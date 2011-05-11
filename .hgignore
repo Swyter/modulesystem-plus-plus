@@ -1,0 +1,8 @@
+syntax: glob
+MS++.opensdf
+MS++.sdf
+MS++/Debug
+MS++/Release
+ipch
+Release
+Debug
