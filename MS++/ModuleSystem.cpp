@@ -69,7 +69,15 @@ void ModuleSystem::DoCompile()
 		m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= cf;
 	}
 
+	CPyModule module_info("module_info");
+
+	m_path = module_info.GetAttr("export_dir").Str();
+	m_path = "C:\\Users\\FX.Net\\Desktop\\"; // TODO: remove
+
 	std::ifstream global_var_stream("variables.txt");
+
+	if (!global_var_stream.is_open())
+		global_var_stream.open(m_path + "variables.txt");
 
 	if (global_var_stream.is_open())
 	{
@@ -81,18 +89,13 @@ void ModuleSystem::DoCompile()
 
 			global_var_stream >> global_var;
 
-			if (!global_var.empty())
+			if (!global_var.empty() && m_global_vars.find(global_var) == m_global_vars.end())
 			{
 				m_global_vars[global_var].index = i++;
 				m_global_vars[global_var].compat = true;
 			}
 		}
 	}
-
-	CPyModule module_info("module_info");
-
-	m_path = module_info.GetAttr("export_dir").Str();
-	m_path = "C:\\Users\\FX.Net\\Desktop\\"; // TODO: remove
 
 	std::cout << "Loading modules..." << std::endl;
 
@@ -126,22 +129,33 @@ void ModuleSystem::DoCompile()
 
 	std::cout << "Compiling..." << std::endl;
 	
+	WriteStrings();
+	WriteSkills();
+	WriteMusic();
 	WriteAnimations();
-	WriteDialogs();
-	WriteFactions();
-	WriteInfoPages();
-	WriteItems();
-	WriteMapIcons();
-	WriteMenus();
 	WriteMeshes();
-	WriteMissionTemplates();
-	WritePresentations();
-	WriteQuests();
+	WriteSounds();
+	WriteSkins();
+	WriteMapIcons();
+	WriteFactions();
+	WriteItems();
+	WriteScenes();
+	WriteTroops();
+	WriteParticleSystems();
 	WriteSceneProps();
-	WriteScripts();
-	WriteSimpleTriggers();
 	WriteTableaus();
+	WritePresentations();
+	WritePartyTemplates();
+	WriteParties();
+	WriteQuests();
+	WriteInfoPages();
+	WriteScripts();
+	WriteMissionTemplates();
+	WriteMenus();
+	WriteSimpleTriggers();
 	WriteTriggers();
+	WriteDialogs();
+	WritePostEffects();
 	
 	WriteQuickStrings();
 	WriteGlobalVars();
@@ -226,11 +240,8 @@ int ModuleSystem::GetId(const CPyObject &obj) // TODO: use
 	{
 		return obj.AsLong();
 	}
-	else
-	{
-		Error("unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str());
-	}
-
+	
+	Error("unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str());
 	return -1;
 }
 
@@ -362,10 +373,9 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 		// TODO: if obfuscating add random/fixed opmask. Not for registers.
 		return operand.AsLong();
 	}
-	else
-	{
-		Error("unrecognized operand type " + (std::string)operand.Type().Str());
-	}
+	
+	Error("unrecognized operand type " + (std::string)operand.Type().Str() + " for " + (std::string)operand.Str());
+	return -1;
 }
 
 void ModuleSystem::Error(const std::string &text)
@@ -934,6 +944,227 @@ void ModuleSystem::WriteMissionTemplates()
 	}
 }
 
+void ModuleSystem::WriteMusic()
+{
+	std::ofstream stream(m_path + "music.txt");
+	CPyIter iter = m_music.GetIter();
+
+	stream << m_music.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject track = iter.Next();
+		unsigned long long flags = track.GetItem(2).AsLong();
+		unsigned long long continue_flags = track.GetItem(3).AsLong();
+		
+		stream << encode_str(track.GetItem(1).AsString()) << " ";
+		stream << flags << " ";
+		stream << (flags | continue_flags) << " ";
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteParticleSystems()
+{
+	std::ofstream stream(m_path + "particle_systems.txt");
+	CPyIter iter = m_particle_systems.GetIter();
+
+	stream << "particle_systemsfile version 1" << std::endl;
+	stream << m_particle_systems.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject particle_system = iter.Next();
+		
+		stream << "psys_" << encode_id(particle_system.GetItem(0).AsString()) << " ";
+		stream << particle_system.GetItem(1) << " ";
+		stream << encode_str(particle_system.GetItem(2).AsString()) << " ";
+		stream << particle_system.GetItem(3) << " ";
+		stream << particle_system.GetItem(4) << " ";
+		stream << particle_system.GetItem(5) << " ";
+		stream << particle_system.GetItem(6) << " ";
+		stream << particle_system.GetItem(7) << " ";
+		stream << particle_system.GetItem(8) << " ";
+
+		for (int i = 0; i < 5; i += 2)
+		{
+			CPyObject key1 = particle_system.GetItem(i + 9);
+			CPyObject key2 = particle_system.GetItem(i + 10);
+			
+			stream << key1.GetItem(0) << " ";
+			stream << key1.GetItem(1) << " ";
+			stream << key2.GetItem(0) << " ";
+			stream << key2.GetItem(1) << " ";
+		}
+
+		CPyObject emit_box_size = particle_system.GetItem(19);
+		
+		stream << emit_box_size.GetItem(0) << " ";
+		stream << emit_box_size.GetItem(1) << " ";
+		stream << emit_box_size.GetItem(2) << " ";
+
+		CPyObject emit_velocity = particle_system.GetItem(20);
+		
+		stream << emit_velocity.GetItem(0) << " ";
+		stream << emit_velocity.GetItem(1) << " ";
+		stream << emit_velocity.GetItem(2) << " ";
+		stream << particle_system.GetItem(21) << " ";
+
+		if (particle_system.Len() > 22)
+			stream << particle_system.GetItem(22) << " ";
+		else
+			stream << "0.0 ";
+
+		if (particle_system.Len() > 23)
+			stream << particle_system.GetItem(23) << " ";
+		else
+			stream << "0.0 ";
+
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteParties()
+{
+	std::ofstream stream(m_path + "parties.txt");
+	CPyIter iter = m_parties.GetIter();
+	int i = 0;
+
+	stream << "partiesfile version 1" << std::endl;
+	stream << m_parties.Size() << std::endl;
+	stream << m_parties.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject party = iter.Next();
+
+		stream << 1 << " " << i << " " << i++ << " ";
+		stream << "p_" << encode_id(party.GetItem(0).AsString()) << " ";
+		stream << encode_str(party.GetItem(1).AsString()) << " ";
+		stream << party.GetItem(2) << " ";
+		stream << GetId(party.GetItem(3)) << " "; // TODO: restrict to menu, etc...
+		stream << party.GetItem(4) << " ";
+		stream << party.GetItem(5) << " ";
+		stream << party.GetItem(6) << " ";
+		stream << party.GetItem(6) << " ";
+		stream << party.GetItem(7) << " ";
+		stream << GetId(party.GetItem(8)) << " ";
+
+		CPyObject position = party.GetItem(9);
+		
+		stream << position.GetItem(0) << " ";
+		stream << position.GetItem(1) << " ";
+		stream << position.GetItem(0) << " ";
+		stream << position.GetItem(1) << " ";
+		stream << position.GetItem(0) << " ";
+		stream << position.GetItem(1) << " ";
+		stream << "0.0 ";
+
+		CPyObject members = party.GetItem(10);
+		CPyIter member_iter = members.GetIter();
+
+		stream << members.Len() << " ";
+
+		while (member_iter.HasNext())
+		{
+			CPyObject member = member_iter.Next();
+			
+			stream << member.GetItem(0) << " ";
+			stream << member.GetItem(1) << " ";
+			stream << "0 ";
+			stream << member.GetItem(2) << " ";
+		}
+
+		if (party.Len() > 11)
+			stream << std::setprecision(7) << (3.1415926 / 180.0) * party.GetItem(11).AsFloat() << " ";
+		else
+			stream << "0.0 ";
+
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WritePartyTemplates()
+{
+	std::ofstream stream(m_path + "party_templates.txt");
+	CPyIter iter = m_party_templates.GetIter();
+
+	stream << "partytemplatesfile version 1" << std::endl;
+	stream << m_party_templates.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject party_template = iter.Next();
+
+		stream << "pt_" << encode_id(party_template.GetItem(0).AsString()) << " ";
+		stream << encode_str(party_template.GetItem(1).AsString()) << " ";
+		stream << party_template.GetItem(2) << " ";
+		stream << party_template.GetItem(3) << " ";
+		stream << party_template.GetItem(4) << " ";
+		stream << party_template.GetItem(5) << " ";
+
+		CPyObject members = party_template.GetItem(6);
+		int num_members = members.Len();
+
+		if (num_members > 6) // TODO: print where
+		{
+			Warning("party template member count exceeds 6");
+			num_members = 6;
+		}
+
+		for (int i = 0; i < num_members; ++i)
+		{
+			CPyObject member = members.GetItem(i);
+			
+			stream << member.GetItem(0) << " ";
+			stream << member.GetItem(1) << " ";
+			stream << member.GetItem(2) << " ";
+
+			if (member.Len() > 3)
+				stream << member.GetItem(3) << " ";
+			else
+				stream << "0 ";
+		}
+
+		for (int i = num_members; i < 6; ++i)
+		{
+			stream << "-1 ";
+		}
+
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WritePostEffects()
+{
+	std::ofstream stream(m_path + "postfx.txt");
+	CPyIter iter = m_postfx.GetIter();
+
+	stream << "postfx_paramsfile version 1" << std::endl;
+	stream << m_postfx.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject effect = iter.Next();
+		
+		stream << "pfx_" << encode_id(effect.GetItem(0).AsString()) << " ";
+		stream << effect.GetItem(1) << " ";
+		stream << effect.GetItem(2) << " ";
+
+		for (int i = 0; i < 3; ++i)
+		{
+			CPyObject params = effect.GetItem(i + 3);
+			
+			stream << params.GetItem(0) << " ";
+			stream << params.GetItem(1) << " ";
+			stream << params.GetItem(2) << " ";
+			stream << params.GetItem(3) << " ";
+		}
+
+		stream << std::endl;
+	}
+}
+
 void ModuleSystem::WritePresentations()
 {
 	std::ofstream stream(m_path + "presentations.txt");
@@ -1024,6 +1255,87 @@ void ModuleSystem::WriteSceneProps()
 	}
 }
 
+void ModuleSystem::WriteScenes()
+{
+	std::ofstream stream(m_path + "scenes.txt");
+	CPyIter iter = m_scenes.GetIter();
+
+	stream << "scenesfile version 1" << std::endl;
+	stream << m_scenes.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject scene = iter.Next();
+
+		stream << "scn_" << encode_id(scene.GetItem(0).AsString()) << " ";
+		stream << encode_str(scene.GetItem(0).AsString()) << " ";
+		stream << scene.GetItem(1) << " ";
+		stream << scene.GetItem(2) << " ";
+		stream << scene.GetItem(3) << " ";
+		stream << scene.GetItem(4).GetItem(0) << " ";
+		stream << scene.GetItem(4).GetItem(1) << " ";
+		stream << scene.GetItem(5).GetItem(0) << " ";
+		stream << scene.GetItem(5).GetItem(1) << " ";
+		stream << scene.GetItem(6) << " ";
+		stream << scene.GetItem(7) << " ";
+
+		CPyObject passages = scene.GetItem(8);
+		CPyIter passage_iter = passages.GetIter();
+
+		stream << passages.Len() << " ";
+
+		while (passage_iter.HasNext())
+		{
+			CPyObject passage = passage_iter.Next();
+			int scene_id;
+
+			if (passage.IsLong())
+			{
+				scene_id = passage.AsLong();
+			}
+			else
+			{
+				std::string name = passage.AsString();
+
+
+				if (name.empty())
+					scene_id = 0;
+				else if (name == "exit")
+					scene_id = 100000;
+				else
+					scene_id = m_ids["scn"][name];
+			}
+			
+			stream << scene_id << " ";
+		}
+
+		CPyObject chests = scene.GetItem(9);
+		CPyIter chest_iter = chests.GetIter();
+
+		stream << chests.Len() << " ";
+
+		while (chest_iter.HasNext())
+		{
+			CPyObject chest = chest_iter.Next();
+			int troop_id;
+
+			if (chest.IsLong())
+				troop_id = chest.AsLong();
+			else
+				troop_id = m_ids["trp"][chest.AsString()];
+			
+			stream << troop_id << " ";
+		}
+
+		if (scene.Len() > 10)
+			stream << scene.GetItem(10) << " ";
+		else
+			stream << "0 ";
+
+		stream << std::endl;
+	}
+}
+
 void ModuleSystem::WriteScripts()
 {
 	std::ofstream stream(m_path + "scripts.txt");
@@ -1054,6 +1366,294 @@ void ModuleSystem::WriteSimpleTriggers()
 
 	stream << "simple_triggers_file version 1" << std::endl;
 	WriteSimpleTriggerBlock(m_simple_triggers, stream);
+}
+
+void ModuleSystem::WriteSkills()
+{
+	std::ofstream stream(m_path + "skills.txt");
+	CPyIter iter = m_skills.GetIter();
+
+	stream << m_skills.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject skill = iter.Next();
+		
+		stream << "skl_" << encode_id(skill.GetItem(0).AsString()) << " ";
+		stream << encode_str(skill.GetItem(1).AsString()) << " ";
+		stream << skill.GetItem(2) << " ";
+		stream << skill.GetItem(3) << " ";
+		stream << encode_str(skill.GetItem(4).AsString()) << " ";
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteSkins()
+{
+	std::ofstream stream(m_path + "skins.txt");
+	int num_skins = m_skins.Size();
+
+	if (num_skins > 16)
+	{
+		Warning("skin count exceeds 6");
+		num_skins = 16;
+	}
+
+	stream << "skins_file version 1" << std::endl;
+	stream << num_skins << std::endl;
+
+	for (int i = 0; i < num_skins; ++i)
+	{
+		CPyObject skin = m_skins.GetItem(i);
+		
+		stream << encode_id(skin.GetItem(0).AsString()) << " ";
+		stream << skin.GetItem(1) << " ";
+		stream << skin.GetItem(2) << " ";
+		stream << skin.GetItem(3) << " ";
+		stream << skin.GetItem(4) << " ";
+		stream << skin.GetItem(5) << " ";
+
+		CPyObject face_keys = skin.GetItem(6);
+		CPyIter face_key_iter = face_keys.GetIter();
+
+		stream << face_keys.Len() << " ";
+
+		while (face_key_iter.HasNext())
+		{
+			CPyObject face_key = face_key_iter.Next();
+
+			stream << "skinkey_" << encode_id(face_key.GetItem(4).AsString()) << " ";
+			stream << skin.GetItem(0) << " ";
+			stream << skin.GetItem(1) << " ";
+			stream << skin.GetItem(2) << " ";
+			stream << skin.GetItem(3) << " ";
+			stream << encode_str(face_key.GetItem(4).AsString()) << " ";
+		}
+
+		CPyObject hair_meshes = skin.GetItem(7);
+		CPyIter hair_mesh_iter = hair_meshes.GetIter();
+
+		stream << hair_meshes.Len() << " ";
+
+		while (hair_mesh_iter.HasNext())
+		{
+			stream << hair_mesh_iter.Next() << " ";
+		}
+
+		CPyObject beard_meshes = skin.GetItem(8);
+		CPyIter beard_mesh_iter = beard_meshes.GetIter();
+
+		stream << beard_meshes.Len() << " ";
+
+		while (beard_mesh_iter.HasNext())
+		{
+			stream << beard_mesh_iter.Next() << " ";
+		}
+
+		CPyObject hair_textures = skin.GetItem(9);
+		CPyIter hair_texture_iter = hair_textures.GetIter();
+
+		stream << hair_textures.Len() << " ";
+
+		while (hair_texture_iter.HasNext())
+		{
+			stream << hair_texture_iter.Next() << " ";
+		}
+
+		CPyObject beard_textures = skin.GetItem(10);
+		CPyIter beard_texture_iter = beard_textures.GetIter();
+
+		stream << beard_textures.Len() << " ";
+
+		while (beard_texture_iter.HasNext())
+		{
+			stream << beard_texture_iter.Next() << " ";
+		}
+
+		CPyObject face_textures = skin.GetItem(11);
+		CPyIter face_texture_iter = face_textures.GetIter();
+
+		stream << face_textures.Len() << " ";
+
+		while (face_texture_iter.HasNext())
+		{
+			CPyObject face_texture = face_texture_iter.Next();
+			
+			stream << face_texture.GetItem(0) << " ";
+			stream << face_texture.GetItem(1) << " ";
+			
+			CPyObject hair_materials;
+			CPyObject hair_colors;
+			int num_hair_materials = 0;
+			int num_hair_colors = 0;
+
+			if (face_texture.Len() > 2)
+			{
+				hair_materials = face_texture.GetItem(2);
+				num_hair_materials = hair_materials.Len();
+
+				if (face_texture.Len() > 3)
+				{
+					hair_colors = face_texture.GetItem(3);
+					num_hair_colors = hair_colors.Len();
+				}
+			}
+
+			stream << num_hair_materials << " ";
+			stream << num_hair_colors << " ";
+
+			for (int i = 0; i < num_hair_materials; ++i)
+			{
+				stream << encode_str(hair_materials.GetItem(i).Str()) << " ";
+			}
+
+			for (int i = 0; i < num_hair_colors; ++i)
+			{
+				stream << hair_colors.GetItem(i) << " ";
+			}
+		}
+
+		CPyObject voices = skin.GetItem(12);
+		CPyIter voice_iter = voices.GetIter();
+
+		stream << voices.Len() << " ";
+
+		while (voice_iter.HasNext())
+		{
+			CPyObject voice = voice_iter.Next();
+
+			stream << voice.GetItem(0) << " ";
+			stream << encode_id(voice.GetItem(1).Str()) << " ";
+		}
+
+		stream << skin.GetItem(13) << " ";
+		stream << skin.GetItem(14) << " ";
+
+		if (skin.Len() > 15)
+			stream << GetId(skin.GetItem(15)) << " ";
+		else
+			stream << "0 ";
+
+		if (skin.Len() > 16)
+			stream << GetId(skin.GetItem(16)) << " ";
+		else
+			stream << "0 ";
+
+		if (skin.Len() > 17)
+		{
+			CPyObject constraints = skin.GetItem(17);
+			CPyIter constraint_iter = constraints.GetIter();
+
+			stream << constraints.Len() << " ";
+
+			while (constraint_iter.HasNext())
+			{
+				CPyObject constraint = constraint_iter.Next();
+				
+				stream << constraint.GetItem(0) << " ";
+				stream << constraint.GetItem(1) << " ";
+
+				int num_pairs = constraint.Len() - 2;
+
+				stream << num_pairs << " ";
+
+				for (int i = 0; i < num_pairs; ++i)
+				{
+					CPyObject pair = constraint.GetItem(i + 2);
+
+					stream << pair.GetItem(0) << " ";
+					stream << pair.GetItem(1) << " ";
+				}
+			}
+		}
+		else
+		{
+			stream << "0 ";
+		}
+
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteSounds()
+{
+	std::ofstream stream(m_path + "sounds.txt");
+	CPyIter iter = m_sounds.GetIter();
+	std::map<std::string, unsigned long> samples;
+	std::vector<std::string> samples_vec;
+
+	while (iter.HasNext())
+	{
+		CPyObject sound = iter.Next();
+		CPyObject sound_files = sound.GetItem(2);
+		CPyIter sound_file_iter = sound_files.GetIter();
+
+		while (sound_file_iter.HasNext())
+		{
+			CPyObject sound_file = sound_file_iter.Next();
+			std::string file = sound_file.GetItem(0).AsString();
+
+			if (samples.find(file) == samples.end())
+			{
+				samples[file] = sound_file.GetItem(1).AsLong();
+				samples_vec.push_back(file);
+			}
+		}
+	}
+
+	stream << "soundsfile version 3" << std::endl;
+	stream << samples_vec.size() << std::endl;
+
+	for (int i = 0; i < samples_vec.size(); ++i)
+	{
+		stream << samples_vec[i] << " ";
+		stream << samples[samples_vec[i]] << " ";
+	}
+
+	iter = m_sounds.GetIter();
+
+	while (iter.HasNext())
+	{
+		CPyObject sound = iter.Next();
+		
+		stream << "snd_" << encode_id(sound.GetItem(0).AsString()) << " ";
+		stream << sound.GetItem(1) << " ";
+		stream << sound.GetItem(2) << " ";
+
+		CPyObject sound_files = sound.GetItem(2);
+		CPyIter sound_file_iter = sound_files.GetIter();
+
+		while (sound_file_iter.HasNext())
+		{
+			CPyObject sound_file = sound_file_iter.Next();
+			std::string file = sound_file.GetItem(0).AsString();
+
+			if (samples.find(file) == samples.end())
+			{
+				samples[file] = sound_file.GetItem(1).AsLong();
+				samples_vec.push_back(file);
+			}
+		}
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteStrings()
+{
+	std::ofstream stream(m_path + "strings.txt");
+	CPyIter iter = m_strings.GetIter();
+	
+	stream << "stringsfile version 1" << std::endl;
+	stream << m_strings.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject string = iter.Next();
+		
+		stream << "str_" << encode_id(string.GetItem(0).AsString()) << " ";
+		stream << encode_str(string.GetItem(1).AsString()) << " ";
+		stream << std::endl;
+	}
 }
 
 void ModuleSystem::WriteTableaus()
@@ -1087,6 +1687,97 @@ void ModuleSystem::WriteTriggers()
 
 	stream << "triggersfile version 1" << std::endl;
 	WriteTriggerBlock(m_triggers, stream);
+}
+
+void ModuleSystem::WriteTroops()
+{
+	std::ofstream stream(m_path + "troops.txt");
+	CPyIter iter = m_troops.GetIter();
+
+	stream << "troopsfile version 2" << std::endl;
+	stream << m_troops.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject troop = iter.Next();
+		
+		stream << "trp_" << encode_id(troop.GetItem(0).AsString()) << " ";
+		stream << encode_str(troop.GetItem(1).AsString()) << " ";
+		stream << encode_str(troop.GetItem(2).AsString()) << " ";
+
+		if (troop.Len() > 13)
+			stream << encode_str(troop.GetItem(13).Str()) << " ";
+		else
+			stream << "0 ";
+
+		stream << troop.GetItem(3) << " ";
+		stream << troop.GetItem(4) << " ";
+		stream << troop.GetItem(5) << " ";
+		stream << troop.GetItem(6) << " ";
+
+		if (troop.Len() > 14)
+			stream << troop.GetItem(14) << " ";
+		else
+			stream << "0 ";
+
+		if (troop.Len() > 15)
+			stream << troop.GetItem(15) << " ";
+		else
+			stream << "0 ";
+
+		CPyObject items = troop.GetItem(7);
+		int num_items = items.Len();
+
+		stream << num_items << " ";
+
+		for (int i = 0; i < num_items; ++i)
+		{
+			stream << GetId(items.GetItem(i)) << " 0 ";
+		}
+
+		for (int i = num_items; i < 64; ++i)
+		{
+			stream << "-1 0 ";
+		}
+
+		CPyNumber attribs = troop.GetItem(8);
+		
+		stream << ((attribs >> CPyNumber(0)) & 0xFF) << " ";
+		stream << ((attribs >> CPyNumber(8)) & 0xFF) << " ";
+		stream << ((attribs >> CPyNumber(16)) & 0xFF) << " ";
+		stream << ((attribs >> CPyNumber(24)) & 0xFF) << " ";
+		stream << ((attribs >> CPyNumber(32)) & 0xFF) << " ";
+
+		CPyNumber proficiencies = troop.GetItem(9).AsNumber();
+
+		for (int i = 0; i < 7; ++i)
+		{
+			stream << (proficiencies & 0x3FF) << " ";
+			proficiencies = proficiencies >> CPyNumber(10);
+		}
+
+		CPyNumber skills = troop.GetItem(10).AsNumber();
+
+		for (int i = 0; i < 6; ++i)
+		{
+			stream << ((skills >> CPyNumber(i * 32)) & 0xFFFFFFFF) << " ";
+		}
+
+		for (int i = 0; i < 2; ++i)
+		{
+			CPyNumber face_key;
+			
+			if (troop.Len() > i + 11)
+				face_key = troop.GetItem(i + 11).AsNumber();
+
+			for (int j = 0; j < 4; ++j)
+			{
+				stream << ((face_key >> CPyNumber((3 - j) * 64)) & 0xFFFFFFFFFFFFFFFF) << " ";
+			}
+		}
+
+		stream << std::endl;
+	}
 }
 
 void ModuleSystem::WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream)

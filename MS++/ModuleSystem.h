@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <ostream>
 #include <fstream>
+#include <iomanip>
 #include <map>
 #include <sstream>
 #include <string>
@@ -91,14 +92,25 @@ private:
 	void WriteMenus();
 	void WriteMeshes();
 	void WriteMissionTemplates();
+	void WriteMusic();
 	void WritePresentations();
 	void WriteQuests();
 	void WriteQuickStrings();
+	void WriteParticleSystems();
+	void WriteParties();
+	void WritePartyTemplates();
+	void WritePostEffects();
 	void WriteSceneProps();
+	void WriteScenes();
 	void WriteScripts();
 	void WriteSimpleTriggers();
+	void WriteSkills();
+	void WriteSkins();
+	void WriteSounds();
+	void WriteStrings();
 	void WriteTableaus();
 	void WriteTriggers();
+	void WriteTroops();
 	void WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream);
 	void WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream);
 	void WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream);
