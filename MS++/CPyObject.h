@@ -7,6 +7,7 @@ class CPyList;
 class CPyString;
 class CPyLong;
 class CPyFloat;
+class CPyNumber;
 
 class CPyObject
 {
@@ -29,11 +30,13 @@ public:
 	CPyString AsString() const;
 	CPyLong AsLong() const;
 	CPyFloat AsFloat() const;
+	CPyNumber AsNumber() const;
 	bool IsTuple() const;
 	bool IsList() const;
 	bool IsString() const;
 	bool IsLong() const;
 	bool IsFloat() const;
+	bool IsNumber() const;
 	PyObject *GetRawObject() const;
 	const CPyObject &operator =(const CPyObject& cobj);
 	bool operator ==(const CPyObject& cobj) const;
@@ -43,6 +46,7 @@ public:
 	operator CPyString() const;
 	operator CPyLong() const;
 	operator CPyFloat() const;
+	operator CPyNumber() const;
 	friend std::ostream & operator <<(std::ostream &stream, const CPyObject &cobj);
 
 protected:
@@ -141,4 +145,14 @@ public:
 	CPyFloat(double val);
 	CPyFloat(PyObject *obj);
 	operator double() const;
+};
+
+class CPyNumber : public CPyObject
+{
+public:
+	CPyNumber();
+	CPyNumber(ssize_t val);
+	CPyNumber(PyObject *obj);
+	CPyNumber operator >>(const CPyNumber &shift);
+	operator unsigned long long() const;
 };

@@ -96,6 +96,12 @@ CPyFloat CPyObject::AsFloat() const
 	return m_obj;
 }
 
+CPyNumber CPyObject::AsNumber() const
+{
+	Py_XINCREF(m_obj);
+	return m_obj;
+}
+
 bool CPyObject::IsTuple() const
 {
 	return PyTuple_Check(m_obj);
@@ -119,6 +125,11 @@ bool CPyObject::IsLong() const
 bool CPyObject::IsFloat() const
 {
 	return PyFloat_Check(m_obj);
+}
+
+bool CPyObject::IsNumber() const
+{
+	return PyNumber_Check(m_obj) == 1;
 }
 
 PyObject *CPyObject::GetRawObject() const
@@ -165,6 +176,11 @@ CPyObject::operator CPyLong() const
 CPyObject::operator CPyFloat() const
 {
 	return AsFloat();
+}
+
+CPyObject::operator CPyNumber() const
+{
+	return AsNumber();
 }
 
 std::ostream &operator <<(std::ostream &stream, const CPyObject &cobj)
@@ -393,7 +409,7 @@ CPyString::CPyString(PyObject *obj) : CPyObject(obj)
 
 CPyString::operator std::string() const
 {
-	PyObject *bytes_obj = CheckObj(PyUnicode_AsASCIIString(m_obj));
+	PyObject *bytes_obj = CheckObj(PyUnicode_AsUTF8String(m_obj));
 
 	if (!bytes_obj)
 		return "";
@@ -464,4 +480,30 @@ CPyFloat::CPyFloat(PyObject *obj) : CPyObject(obj)
 CPyFloat::operator double() const
 {
 	return PyFloat_AsDouble(m_obj);
+}
+
+CPyNumber::CPyNumber()
+{
+	m_obj = CheckObj(PyLong_FromLong(0L));
+}
+
+CPyNumber::CPyNumber(ssize_t val)
+{
+	m_obj = CheckObj(PyLong_FromSsize_t(val));
+}
+
+CPyNumber::CPyNumber(PyObject *obj) : CPyObject(obj)
+{
+	if (!PyNumber_Check(m_obj))
+		throw CPyException("not a numbers");
+}
+
+CPyNumber CPyNumber::operator >>(const CPyNumber &shift)
+{
+	return PyNumber_Rshift(m_obj, shift.m_obj);
+}
+
+CPyNumber::operator unsigned long long() const
+{
+	return CPyLong(PyLong_AsUnsignedLongLongMask((PyNumber_Long(m_obj))));
 }
