@@ -54,3 +54,11 @@ std::string &remove(std::string &str, char character)
 	str.resize(std::remove(str.begin(), str.end(), character) - str.begin());
 	return str;
 }
+
+std::string itostr(int number)
+{
+	std::stringstream ss;
+
+	ss << number;
+	return ss.str();
+}
