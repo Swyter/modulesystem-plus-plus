@@ -1,11 +1,10 @@
 #include <Windows.h>
-#include <iostream>
 #include "Python.h"
+#include <iostream>
 #include "ModuleSystem.h"
 
 int main(int argc, char **argv)
 {
-	SetCurrentDirectory("D:\\Dev\\test\\");
 	Py_Initialize();
 	
 	ModuleSystem ms;
