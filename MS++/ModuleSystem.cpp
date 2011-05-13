@@ -444,8 +444,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 
 			if (m_local_vars.find(value) == m_local_vars.end())
 			{
-				int index = m_local_vars.size();
-				
+				index = m_local_vars.size();
 				m_local_vars[value].index = index;
 				m_local_vars[value].assignments = 1;
 				m_local_vars[value].usages = 0;
@@ -988,9 +987,7 @@ void ModuleSystem::WriteMapIcons()
 		if (map_icon.Len() > trigger_pos)
 			WriteSimpleTriggerBlock(map_icon[trigger_pos], stream, name);
 		else
-			stream << "0 ";
-
-		stream << std::endl;
+			stream << "0 " << std::endl;
 	}
 }
 
@@ -1100,8 +1097,6 @@ void ModuleSystem::WriteMissionTemplates()
 		for (int j = 0; j < num_groups; ++j)
 		{
 			CPyObject group = groups[j];
-
-			stream << std::endl;
 			
 			stream << group[0] << " ";
 			stream << group[1] << " ";
@@ -1133,9 +1128,7 @@ void ModuleSystem::WriteMissionTemplates()
 			}
 		}
 		
-		stream << std::endl;
 		WriteTriggerBlock(mission_template[5], stream, name);
-		stream << std::endl;
 	}
 }
 
@@ -1396,7 +1389,6 @@ void ModuleSystem::WritePresentations()
 		stream << presentation[1] << " ";
 		stream << GetId("mesh", presentation[2], name) << " ";
 		WriteSimpleTriggerBlock(presentation[3], stream, name);
-		stream << std::endl;
 	}
 }
 
@@ -1461,12 +1453,10 @@ void ModuleSystem::WriteSceneProps()
 		
 		stream << name << " ";
 		stream << scene_prop[1] << " ";
-		stream << (((unsigned long)scene_prop[1].AsLong() >> 20) & 0xFF) << " ";
+		stream << (((unsigned long long)scene_prop[1].AsLong() >> 20) & 0xFF) << " ";
 		stream << GetResource(scene_prop[2], res_mesh, name) << " ";
 		stream << GetResource(scene_prop[3], res_body, name) << " ";
-		stream << std::endl;
 		WriteSimpleTriggerBlock(scene_prop[4], stream, name);
-		stream << std::endl;
 	}
 }
 
