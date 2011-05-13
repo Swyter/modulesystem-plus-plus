@@ -5,14 +5,11 @@
 #include <ostream>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 #include <map>
 #include <sstream>
 #include <string>
 #include <vector>
-#include <iostream> // TODO: RM
-
-// TODO: multithreading
-// TODO: obfuscate end lines
 
 struct ScriptErrorContext
 {
@@ -66,8 +63,7 @@ private:
 #define msf_obfuscate_global_vars   0x2
 #define msf_obfuscate_dialog_states 0x4
 #define msf_obfuscate_scripts       0x8
-#define msf_obfuscate_tags          0x10 // TODO
-#define msf_skip_id_files           0x20 // TODO
+#define msf_skip_id_files           0x10 // TODO
 
 class ModuleSystem
 {
