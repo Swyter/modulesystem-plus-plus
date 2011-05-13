@@ -1,61 +1,17 @@
 #include "ModuleSystem.h"
 
-std::string &ltrim(std::string &str, const std::string &chars = " \t\n\v\f\r")
-{
-	int len = str.length();
-
-	for (int i = 0; i < len; ++i)
-	{
-		if (chars.find(str[i]) == std::string::npos)
-		{
-			str.erase(0, i);
-			break;
-		}
-	}
-
-	return str;
-}
-
-std::string &rtrim(std::string &str, const std::string &chars = " \t\n\v\f\r")
-{
-	int len = str.length();
-
-	for (int i = len - 1; i >= 0; --i)
-	{
-		if (chars.find(str[i]) == std::string::npos)
-		{
-			str.erase(i + 1);
-			break;
-		}
-	}
-
-	return str;
-}
-
-std::string &trim(std::string &str, const std::string &chars = " \t\n\v\f\r")
-{
-	ltrim(str, chars);
-	rtrim(str, chars);
-	return str;
-}
+#include <Windows.h>
 
 std::string encode_str(const std::string &str)
 {
 	std::string text = str;
-
-	std::replace(text.begin(), text.end(), ' ', '_');
-	std::replace(text.begin(), text.end(), '\t', '_');
-	return text;
+	return replace(replace(text, ' ', '_'), '\t', '_');
 }
 
 std::string encode_res(const std::string &str)
 {
 	std::string text = str;
-	
-	trim(text);
-	std::replace(text.begin(), text.end(), ' ', '_');
-	std::replace(text.begin(), text.end(), '\t', '_');
-	return text;
+	return replace(replace(trim(text), ' ', '_'), '\t', '_');
 }
 
 std::string encode_full(const std::string &str)
@@ -88,9 +44,29 @@ std::string encode_id(const std::string &str)
 	return text;
 }
 
+ModuleSystem::ModuleSystem(const std::string &path)
+{
+	m_input_path = path;
+	SetCurrentDirectory(m_input_path.c_str());
+	Py_Initialize();
+}
+
+ModuleSystem::~ModuleSystem()
+{
+	Py_Finalize();
+}
+
 void ModuleSystem::Compile(unsigned long long flags)
 {
 	m_flags = flags;
+
+	if (m_input_path.back() != '\\')
+		m_input_path.push_back('\\');
+
+	LARGE_INTEGER frequency, t1, t2;
+	
+	QueryPerformanceFrequency(&frequency);
+	QueryPerformanceCounter(&t1);
 
 	try
 	{
@@ -98,8 +74,63 @@ void ModuleSystem::Compile(unsigned long long flags)
 	}
 	catch (CPyException e)
 	{
-		throw CompileException(e.GetText());
+		std::cout << "Python exception: " << e.GetText() << std::endl;
+		return;
 	}
+	catch (CompileException e)
+	{
+		std::cout << "Compile exception: " << e.GetText() << std::endl;
+		return;
+	}
+
+	QueryPerformanceCounter(&t2);
+
+	for (size_t i = 0; i < m_warnings.size(); ++i)
+	{
+		std::cout << m_warnings[i] << std::endl;
+	}
+
+	if (m_flags & msf_list_resources)
+	{
+		std::ofstream res_stream(m_output_path + "resource_usage.txt");
+		std::map<int, std::map<std::string, int> >::const_iterator res_type_it;
+		std::map<std::string, int>::const_iterator res_it;
+
+		for (res_type_it = m_resources.begin(); res_type_it != m_resources.end(); ++res_type_it)
+		{
+			std::string res_type;
+
+			switch (res_type_it->first)
+			{
+			case res_mesh:
+				res_type = "Meshes";
+				break;
+			case res_material:
+				res_type = "Materials";
+				break;
+			case res_skeleton:
+				res_type = "Skeleton Models";
+				break;
+			case res_body:
+				res_type = "Bodies";
+				break;
+			case res_animation:
+				res_type = "Skeleton Animations";
+				break;
+			}
+
+			res_stream << "== " << res_type << " ==" << std::endl;
+
+			for (res_it = res_type_it->second.begin(); res_it != res_type_it->second.end(); ++ res_it)
+			{
+				res_stream << res_it->first << " " << res_it->second << std::endl;
+			}
+
+			res_stream << std::endl;
+		}
+	}
+
+	std::cout << "Compile time: " << ((t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart) << "ms" << std::endl;
 }
 
 void ModuleSystem::DoCompile()
@@ -113,27 +144,32 @@ void ModuleSystem::DoCompile()
 
 	while (lhs_operations_iter.HasNext())
 	{
-		m_operations[OPCODE(lhs_operations_iter.Next().AsLong())] |= lhs;
+		m_operations[OPCODE(lhs_operations_iter.Next().AsLong())] |= optype_lhs;
 	}
 
 	while (ghs_operations_iter.HasNext())
 	{
-		m_operations[OPCODE(ghs_operations_iter.Next().AsLong())] |= ghs;
+		m_operations[OPCODE(ghs_operations_iter.Next().AsLong())] |= optype_ghs;
 	}
 
 	while (cf_operations_iter.HasNext())
 	{
-		m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= cf;
+		m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= optype_cf;
 	}
 
 	CPyModule module_info("module_info");
 
-	m_path = module_info.GetAttr("export_dir").Str();
+	m_output_path = module_info.GetAttr("export_dir").Str();
+
+	trim(m_output_path);
+
+	if (m_output_path.back() != '\\')
+		m_output_path.push_back('\\');
 
 	std::ifstream global_var_stream("variables.txt");
 
 	if (!global_var_stream.is_open())
-		global_var_stream.open(m_path + "variables.txt");
+		global_var_stream.open(m_output_path + "variables.txt");
 
 	if (global_var_stream.is_open())
 	{
@@ -155,20 +191,20 @@ void ModuleSystem::DoCompile()
 
 	std::cout << "Loading modules..." << std::endl;
 
-	m_animations = AddModule("animations", "anim");
-	m_dialogs = AddModule("dialogs", "");
+	m_animations = AddModule("animations", "animations", "anim");
+	m_dialogs = AddModule("dialogs", "dialogs", "");
 	m_factions = AddModule("factions", "fac");
-	m_game_menus = AddModule("game_menus", "mnu");
+	m_game_menus = AddModule("game_menus", "game_menus", "mnu", "menus", "menu");
 	m_info_pages = AddModule("info_pages", "ip");
 	m_items = AddModule("items", "itm");
 	m_map_icons = AddModule("map_icons", "icon");
 	m_meshes = AddModule("meshes", "mesh");
 	m_music = AddModule("music", "tracks", "track");
-	m_mission_templates = AddModule("mission_templates", "mt");
+	m_mission_templates = AddModule("mission_templates", "mission_templates", "mt", "mission_templates", "mst");
 	m_particle_systems = AddModule("particle_systems", "psys");
 	m_parties = AddModule("parties", "p");
 	m_party_templates = AddModule("party_templates", "pt");
-	m_postfx = AddModule("postfx", "postfx_params", "pfx");
+	m_postfx = AddModule("postfx", "postfx_params", "pfx", "postfx_params", "pfx");
 	m_presentations = AddModule("presentations", "prsnt");
 	m_quests = AddModule("quests", "qst");
 	m_scene_props = AddModule("scene_props", "spr");
@@ -176,7 +212,7 @@ void ModuleSystem::DoCompile()
 	m_scripts = AddModule("scripts", "script");
 	m_simple_triggers = AddModule("simple_triggers", "");
 	m_skills = AddModule("skills", "skl");
-	m_skins = AddModule("skins", "skn");
+	m_skins = AddModule("skins", "");
 	m_sounds = AddModule("sounds", "snd");
 	m_strings = AddModule("strings", "str");
 	m_tableau_materials = AddModule("tableau_materials", "tableaus", "tableau");
@@ -226,14 +262,9 @@ void ModuleSystem::DoCompile()
 		if (!it->second.compat && it->second.usages == 0)
 			Warning("unused global variable $" + it->first);
 	}
-
-	for (size_t i = 0; i < m_warnings.size(); ++i)
-	{
-		std::cout << m_warnings[i] << std::endl;
-	}
 };
 
-CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix)
+CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix)
 {
 	CPyModule module("module_" + module_name);
 	CPyList list = module.GetAttr(list_name);
@@ -241,30 +272,45 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 	if (!prefix.empty())
 	{
 		int num_entries = list.Size();
+		std::vector<std::string> ids(num_entries);
 
 		for (int i = 0; i < num_entries; ++i)
 		{
-			CPyObject item = list.GetItem(i);
+			CPyObject item = list[i];
 			std::string name;
 			
-			if (item.IsTuple())
-				name = item.AsTuple().GetItem(0).AsString();
-			else if (item.IsList())
-				name = item.AsList().GetItem(0).AsString();
+			if (item.IsTuple() || item.IsList())
+				name = item[0].AsString();
+			else
+				Error("unrecognized list format for " + list_name + " in " + "module_" + module_name);
 			
-			std::string prefix_lower = prefix;
-			
-			std::transform(prefix_lower.begin(), prefix_lower.end(), prefix_lower.begin(), ::tolower);
 			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
 
-			if (m_ids[prefix_lower].find(name) == m_ids[prefix_lower].end())
-				m_ids[prefix_lower][name] = i;
+			if (m_ids[prefix].find(name) == m_ids[prefix].end())
+				m_ids[prefix][name] = i;
 			else
 				Warning("duplicate entry in " + module_name + ": " + prefix + "_" + name);
+
+			ids[i] = name;
+		}
+
+		if (!(m_flags & msf_skip_id_files))
+		{
+			std::ofstream stream(m_output_path + "ID_" + id_name + ".py");
+
+			for (int i = 0; i < num_entries; ++i)
+			{
+				stream << id_prefix << "_" << ids[i] << " = " << i << std::endl;
+			}
 		}
 	}
 
 	return list;
+};
+
+CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix)
+{
+	return AddModule(module_name, list_name, prefix, module_name, prefix);
 };
 
 CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &prefix)
@@ -284,7 +330,7 @@ int ModuleSystem::GetId(const CPyObject &obj) // TODO: use
 			
 		std::string prefix = str.substr(0, underscore_pos);
 		std::string value = str.substr(underscore_pos + 1);
-			
+		
 		std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
 		std::transform(value.begin(), value.end(), value.begin(), ::tolower);
 
@@ -305,14 +351,37 @@ int ModuleSystem::GetId(const CPyObject &obj) // TODO: use
 	return -1;
 }
 
+std::string ModuleSystem::GetResource(const CPyObject &obj, int resource_type) // TODO: use
+{
+	if (obj.IsString())
+	{
+		std::string resource_name = encode_res(obj.AsString());
+
+		if (resource_name != "0" && resource_name != "none")
+		{
+			if (m_resources[resource_type].find(resource_name) == m_resources[resource_type].end())
+				m_resources[resource_type][resource_name] = 0;
+
+			m_resources[resource_type][resource_name]++;
+		}
+
+		return resource_name;
+	}
+	else if (obj.IsLong())
+	{
+		return obj.Str();
+	}
+	
+	Error("unrecognized resource type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str());
+	return "0";
+}
+
 long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 {
-	CPyObject operand = statement.GetItem(pos);
+	CPyObject operand = statement[pos];
 
-	if (operand.IsTuple() && operand.Len() == 1)
-		operand = operand.AsTuple().GetItem(0);
-	else if (operand.IsList() && operand.Len() == 1)
-		operand = operand.AsList().GetItem(0);
+	if ((operand.IsTuple() || operand.IsList()) && operand.Len() == 1)
+		operand = operand[0];
 
 	if (operand.IsString())
 	{
@@ -327,7 +396,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 			{
 				int index = m_local_vars.size();
 
-				if (pos != 1 || !(m_operations[OPCODE(statement.GetItem(0).AsLong())] & lhs))
+				if (pos != 1 || !(m_operations[OPCODE(statement[0].AsLong())] & optype_lhs))
 					Warning("usage of unassigned local variable :" + value);
 				
 				m_local_vars[value].index = index;
@@ -336,7 +405,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 			}
 			else
 			{
-				if (pos == 1 && m_operations[OPCODE(statement.GetItem(0).AsLong())] & lhs)
+				if (pos == 1 && m_operations[OPCODE(statement[0].AsLong())] & optype_lhs)
 					m_local_vars[value].assignments++;
 				else
 					m_local_vars[value].usages++;
@@ -356,14 +425,14 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 				index = m_global_vars.size();
 				m_global_vars[value].index = index;
 
-				if (pos == 1 && m_operations[OPCODE(statement.GetItem(0).AsLong())] & (lhs | ghs))
+				if (pos == 1 && m_operations[OPCODE(statement[0].AsLong())] & (optype_lhs | optype_ghs))
 					m_global_vars[value].assignments = 1;
 				else
 					m_global_vars[value].usages = 1;
 			}
 			else
 			{
-				if (pos == 1 && m_operations[OPCODE(statement.GetItem(0).AsLong())] & (lhs | ghs))
+				if (pos == 1 && m_operations[OPCODE(statement[0].AsLong())] & (optype_lhs | optype_ghs))
 					m_global_vars[value].assignments++;
 				else
 					m_global_vars[value].usages++;
@@ -418,12 +487,17 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 	}
 	else if (operand.IsLong())
 	{
-		// TODO: if obfuscating add random/fixed opmask. Not for registers.
 		return operand.AsLong();
 	}
 	
 	Error("unrecognized operand type " + (std::string)operand.Type().Str() + " for " + (std::string)operand.Str());
 	return -1;
+}
+
+void ModuleSystem::PrepareModule(const std::string &name)
+{
+	m_cur_module = name;
+	std::cout << "Exporting " << name << std::endl; // TODO: use m_out_stream instead of cout
 }
 
 void ModuleSystem::Error(const std::string &text)
@@ -441,7 +515,9 @@ void ModuleSystem::Warning(const std::string &text)
 
 void ModuleSystem::WriteAnimations()
 {
-	std::ofstream stream(m_path + "actions.txt");
+	PrepareModule("animations");
+
+	std::ofstream stream(m_output_path + "actions.txt");
 	CPyIter iter = m_animations.GetIter();
 
 	stream << m_animations.Size() << std::endl;
@@ -450,9 +526,9 @@ void ModuleSystem::WriteAnimations()
 	{
 		CPyObject animation = iter.Next();
 		
-		stream << encode_str(animation.GetItem(0).AsString()) << " ";
-		stream << animation.GetItem(1) << " ";
-		stream << animation.GetItem(2) << " ";
+		stream << encode_str(animation[0].AsString()) << " ";
+		stream << animation[1] << " ";
+		stream << animation[2] << " ";
 
 		int num_sequences = animation.Len() - 3;
 
@@ -460,25 +536,25 @@ void ModuleSystem::WriteAnimations()
 
 		for (int i = 0; i < num_sequences; ++i)
 		{
-			CPyObject sequence = animation.GetItem(i + 3);
+			CPyObject sequence = animation[i + 3];
 			
 			stream << std::endl;
-			stream << sequence.GetItem(0) << " ";
-			stream << encode_str(sequence.GetItem(1).AsString()) << " ";
-			stream << sequence.GetItem(2) << " ";
-			stream << sequence.GetItem(3) << " ";
-			stream << sequence.GetItem(4) << " ";
+			stream << sequence[0] << " ";
+			stream << GetResource(sequence[1], res_animation) << " ";
+			stream << sequence[2] << " ";
+			stream << sequence[3] << " ";
+			stream << sequence[4] << " ";
 
 			if (sequence.Len() > 5)
-				stream << sequence.GetItem(5) << " ";
+				stream << sequence[5] << " ";
 			else
 				stream << "0 ";
 
 			if (sequence.Len() > 6)
 			{
-				stream << sequence.GetItem(6).GetItem(0) << " ";
-				stream << sequence.GetItem(6).GetItem(1) << " ";
-				stream << sequence.GetItem(6).GetItem(2) << " ";
+				stream << sequence[6][0] << " ";
+				stream << sequence[6][1] << " ";
+				stream << sequence[6][2] << " ";
 			}
 			else
 			{
@@ -488,7 +564,7 @@ void ModuleSystem::WriteAnimations()
 			}
 
 			if (sequence.Len() > 7)
-				stream << sequence.GetItem(7) << " ";
+				stream << sequence[7] << " ";
 			else
 				stream << "0.0 ";
 		}
@@ -497,9 +573,11 @@ void ModuleSystem::WriteAnimations()
 	}
 }
 
-void ModuleSystem::WriteDialogs()
+void ModuleSystem::WriteDialogs() // TODO: optimize
 {
-	std::ofstream states_stream(m_path + "dialog_states.txt");
+	PrepareModule("dialogs");
+
+	std::ofstream states_stream(m_output_path + "dialog_states.txt");
 	CPyIter states_iter = m_dialogs.GetIter();
 	std::map<std::string, int> states;
 	int num_states = 15;
@@ -530,7 +608,7 @@ void ModuleSystem::WriteDialogs()
 	while (states_iter.HasNext())
 	{
 		CPyObject sentence = states_iter.Next();
-		std::string output_token = sentence.GetItem(4).AsString();
+		std::string output_token = sentence[4].AsString();
 
 		if (states.find(output_token) == states.end())
 		{
@@ -543,7 +621,7 @@ void ModuleSystem::WriteDialogs()
 		}
 	}
 
-	std::ofstream stream(m_path + "conversation.txt");
+	std::ofstream stream(m_output_path + "conversation.txt");
 	CPyIter	iter = m_dialogs.GetIter();
 	std::map<std::string, std::string> dialog_ids;
 
@@ -553,9 +631,9 @@ void ModuleSystem::WriteDialogs()
 	while (iter.HasNext())
 	{
 		CPyObject sentence = iter.Next();
-		std::string input_token = sentence.GetItem(1).AsString();
-		std::string output_token = sentence.GetItem(4).AsString();
-		std::string text = encode_str(sentence.GetItem(3).AsString());
+		std::string input_token = sentence[1].AsString();
+		std::string output_token = sentence[4].AsString();
+		std::string text = encode_str(sentence[3].AsString());
 
 		if (states.find(input_token) == states.end())
 			Error("input token not found: " + input_token);
@@ -579,19 +657,19 @@ void ModuleSystem::WriteDialogs()
 		dialog_ids[auto_id] = text;
 
 		stream << auto_id << " ";
-		stream << sentence.GetItem(0) << " ";
+		stream << sentence[0] << " ";
 		stream << states[input_token] << " ";
-		WriteStatementBlock(sentence.GetItem(2), stream);
+		WriteStatementBlock(sentence[2], stream);
 
 		if (text.empty())
 			text = "NO_TEXT";
 
 		stream << text << " ";
 		stream << states[output_token] << " ";
-		WriteStatementBlock(sentence.GetItem(5), stream);
+		WriteStatementBlock(sentence[5], stream);
 
 		if (sentence.Len() > 6)
-			stream << encode_str(sentence.GetItem(6).AsString()) << " ";
+			stream << encode_str(sentence[6].AsString()) << " ";
 		else
 			stream << "NO_VOICEOVER ";
 
@@ -601,7 +679,9 @@ void ModuleSystem::WriteDialogs()
 
 void ModuleSystem::WriteFactions()
 {
-	std::ofstream stream(m_path + "factions.txt");
+	PrepareModule("factions");
+
+	std::ofstream stream(m_output_path + "factions.txt");
 	CPyIter iter = m_factions.GetIter();
 	
 	std::map<std::string, int> faction_ids;
@@ -609,28 +689,28 @@ void ModuleSystem::WriteFactions()
 
 	for (int i = 0; i < m_factions.Len(); ++i)
 	{
-		faction_ids[m_factions.GetItem(i).GetItem(0).AsString()] = i;
+		faction_ids[m_factions[i][0].AsString()] = i;
 	}
 
 	while (iter.HasNext())
 	{
 		CPyObject faction = iter.Next();
-		int faction_id = faction_ids[faction.GetItem(0).AsString()];
-		CPyIter relation_iter = faction.GetItem(4).GetIter();
+		int faction_id = faction_ids[faction[0].AsString()];
+		CPyIter relation_iter = faction[4].GetIter();
 
-		relations[faction_id][faction_id] = faction.GetItem(3).AsFloat();
+		relations[faction_id][faction_id] = faction[3].AsFloat();
 
 		while (relation_iter.HasNext())
 		{
 			CPyObject relation = relation_iter.Next();
 			int other_id;
 
-			if (relation.GetItem(0).IsString())
-				other_id = faction_ids[relation.GetItem(0).AsString()];
+			if (relation[0].IsString())
+				other_id = faction_ids[relation[0].AsString()];
 			else
-				other_id = relation.GetItem(0).AsLong();
+				other_id = relation[0].AsLong();
 
-			double value = relation.GetItem(1).AsFloat();
+			double value = relation[1].AsFloat();
 
 			relations[faction_id][other_id] = value;
 
@@ -646,14 +726,14 @@ void ModuleSystem::WriteFactions()
 	while (iter.HasNext())
 	{
 		CPyObject faction = iter.Next();
-		int faction_id = faction_ids[faction.GetItem(0).AsString()];
+		int faction_id = faction_ids[faction[0].AsString()];
 		
-		stream << "fac_" << encode_id(faction.GetItem(0).AsString()) << " ";
-		stream << encode_str(faction.GetItem(1).AsString()) << " ";
-		stream << faction.GetItem(2) << " ";
+		stream << "fac_" << encode_id(faction[0].AsString()) << " ";
+		stream << encode_str(faction[1].AsString()) << " ";
+		stream << faction[2] << " ";
 
 		if (faction.Len() > 6)
-			stream << faction.GetItem(6) << " ";
+			stream << faction[6] << " ";
 		else
 			stream << 0xAAAAAA << " ";
 
@@ -664,7 +744,7 @@ void ModuleSystem::WriteFactions()
 
 		if (faction.Len() > 5)
 		{
-			CPyObject ranks = faction.GetItem(5);
+			CPyObject ranks = faction[5];
 			CPyIter rank_iter = ranks.GetIter();
 
 			stream << ranks.Len() << " ";
@@ -681,7 +761,9 @@ void ModuleSystem::WriteFactions()
 
 void ModuleSystem::WriteGlobalVars()
 {
-	std::ofstream stream(m_path + "variables.txt");
+	PrepareModule("global variables");
+
+	std::ofstream stream(m_output_path + "variables.txt");
 	std::vector<std::string> global_vars(m_global_vars.size());
 	std::map<std::string, Variable>::const_iterator it;
 
@@ -701,7 +783,9 @@ void ModuleSystem::WriteGlobalVars()
 
 void ModuleSystem::WriteInfoPages()
 {
-	std::ofstream stream(m_path + "info_pages.txt");
+	PrepareModule("info pages");
+
+	std::ofstream stream(m_output_path + "info_pages.txt");
 	CPyIter iter = m_info_pages.GetIter();
 
 	stream << "infopagesfile version 1" << std::endl;
@@ -711,31 +795,19 @@ void ModuleSystem::WriteInfoPages()
 	{
 		CPyObject info_page = iter.Next();
 		
-		stream << "ip_" << encode_id(info_page.GetItem(0).AsString()) << " ";
-		stream << encode_str(info_page.GetItem(1).AsString()) << " ";
-		stream << encode_str(info_page.GetItem(2).AsString()) << " ";
+		stream << "ip_" << encode_id(info_page[0].AsString()) << " ";
+		stream << encode_str(info_page[1].AsString()) << " ";
+		stream << encode_str(info_page[2].AsString()) << " ";
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteItems()
 {
-	std::ofstream stream(m_path + "item_kinds1.txt");
+	PrepareModule("items");
+
+	std::ofstream stream(m_output_path + "item_kinds1.txt");
 	CPyIter iter = m_items.GetIter();
-	CPyModule header_items("header_items");
-	CPyObject get_weight = header_items.GetAttr("get_weight");
-	CPyObject get_abundance = header_items.GetAttr("get_abundance");
-	CPyObject get_head_armor = header_items.GetAttr("get_head_armor");
-	CPyObject get_body_armor = header_items.GetAttr("get_body_armor");
-	CPyObject get_leg_armor = header_items.GetAttr("get_leg_armor");
-	CPyObject get_difficulty = header_items.GetAttr("get_difficulty");
-	CPyObject get_hit_points = header_items.GetAttr("get_hit_points");
-	CPyObject get_speed_rating = header_items.GetAttr("get_speed_rating");
-	CPyObject get_missile_speed = header_items.GetAttr("get_missile_speed");
-	CPyObject get_weapon_length = header_items.GetAttr("get_weapon_length");
-	CPyObject get_max_ammo = header_items.GetAttr("get_max_ammo");
-	CPyObject get_thrust_damage = header_items.GetAttr("get_thrust_damage");
-	CPyObject get_swing_damage = header_items.GetAttr("get_swing_damage");
 
 	stream << "itemsfile version 3" << std::endl;
 	stream << m_items.Size() << std::endl;
@@ -744,11 +816,11 @@ void ModuleSystem::WriteItems()
 	{
 		CPyObject item = iter.Next();
 		
-		stream << "itm_" << encode_id(item.GetItem(0).AsString()) << " ";
-		stream << encode_str(item.GetItem(1).AsString()) << " ";
-		stream << encode_str(item.GetItem(1).AsString()) << " ";
+		stream << "itm_" << encode_id(item[0].AsString()) << " ";
+		stream << encode_str(item[1].AsString()) << " ";
+		stream << encode_str(item[1].AsString()) << " ";
 
-		CPyObject variations = item.GetItem(2);
+		CPyObject variations = item[2];
 		int num_variations = variations.Len();
 
 		if (num_variations > 16)
@@ -761,37 +833,52 @@ void ModuleSystem::WriteItems()
 
 		for (int i = 0; i < num_variations; ++i)
 		{
-			CPyObject variation = variations.GetItem(i);
+			CPyObject variation = variations[i];
 			
-			stream << encode_res(variation.GetItem(0).AsString()) << " ";
-			stream << variation.GetItem(1) << " ";
+			stream << GetResource(variation[0], res_mesh) << " ";
+			stream << variation[1] << " ";
 		}
 
-		stream << item.GetItem(3) << " ";
-		stream << item.GetItem(4) << " ";
-		stream << item.GetItem(5) << " ";
-		stream << item.GetItem(7) << " ";
+		stream << item[3] << " ";
+		stream << item[4] << " ";
+		stream << item[5] << " ";
+		stream << item[7] << " ";
 
-		CPyTuple args(1);
+		CPyNumber item_stats = item[6].AsNumber();
+		double weight = 0.25 * ((item_stats >> 24) & 0xFF);
+		int head_armor = (item_stats >> 0) & 0xFF;
+		int body_armor = (item_stats >> 8) & 0xFF;
+		int leg_armor = (item_stats >> 16) & 0xFF;
+		int difficulty = (item_stats >> 32) & 0xFF;
+		int hit_points = (item_stats >> 40) & 0xFFFF;
+		int speed_rating = (item_stats >> 80) & 0xFF;
+		int missile_speed = (item_stats >> 90) & 0x3FF;
+		int weapon_length = (item_stats >> 70) & 0x3FF;
+		int max_ammo = (item_stats >> 100) & 0xFF;
+		int thrust_damage = (item_stats >> 60) & 0x3FF;
+		int swing_damage = (item_stats >> 50) & 0x3FF;
+		int abundance = (item_stats >> 110) & 0xFF;
 
-		args.SetItem(0, item.GetItem(6));
-		stream << get_weight.Call(args) << " ";
-		stream << get_abundance.Call(args) << " ";
-		stream << get_head_armor.Call(args) << " ";
-		stream << get_body_armor.Call(args) << " ";
-		stream << get_leg_armor.Call(args) << " ";
-		stream << get_difficulty.Call(args) << " ";
-		stream << get_hit_points.Call(args) << " ";
-		stream << get_speed_rating.Call(args) << " ";
-		stream << get_missile_speed.Call(args) << " ";
-		stream << get_weapon_length.Call(args) << " ";
-		stream << get_max_ammo.Call(args) << " ";
-		stream << get_thrust_damage.Call(args) << " ";
-		stream << get_swing_damage.Call(args) << " ";
+		if (abundance == 0)
+			abundance = 100;
+		
+		stream << weight << " ";
+		stream << abundance << " ";
+		stream << head_armor << " ";
+		stream << body_armor << " ";
+		stream << leg_armor << " ";
+		stream << difficulty << " ";
+		stream << hit_points << " ";
+		stream << speed_rating << " ";
+		stream << missile_speed << " ";
+		stream << weapon_length << " ";
+		stream << max_ammo << " ";
+		stream << thrust_damage << " ";
+		stream << swing_damage << " ";
 
 		if (item.Len() > 9)
 		{
-			CPyObject factions = item.GetItem(9);
+			CPyObject factions = item[9];
 			int num_factions = factions.Len();
 
 			if (num_factions > 16)
@@ -804,7 +891,7 @@ void ModuleSystem::WriteItems()
 
 			for (int i = 0; i < num_factions; ++i)
 			{
-				stream << factions.GetItem(i) << " ";
+				stream << factions[i] << " ";
 			}
 		}
 		else
@@ -813,7 +900,7 @@ void ModuleSystem::WriteItems()
 		}
 
 		if (item.Len() > 8)
-			WriteSimpleTriggerBlock(item.GetItem(8), stream);
+			WriteSimpleTriggerBlock(item[8], stream);
 		else
 			stream << "0" << std::endl;
 	}
@@ -821,7 +908,9 @@ void ModuleSystem::WriteItems()
 
 void ModuleSystem::WriteMapIcons()
 {
-	std::ofstream stream(m_path + "map_icons.txt");
+	PrepareModule("map icons");
+
+	std::ofstream stream(m_output_path + "map_icons.txt");
 	CPyIter iter = m_map_icons.GetIter();
 
 	stream << "map_icons_file version 1" << std::endl;
@@ -831,19 +920,19 @@ void ModuleSystem::WriteMapIcons()
 	{
 		CPyObject map_icon = iter.Next();
 		
-		stream << encode_id(map_icon.GetItem(0).AsString()) << " ";
-		stream << map_icon.GetItem(1) << " ";
-		stream << map_icon.GetItem(2) << " ";
-		stream << map_icon.GetItem(3) << " ";
-		stream << GetId(map_icon.GetItem(4)) << " ";
+		stream << encode_id(map_icon[0].AsString()) << " ";
+		stream << map_icon[1] << " ";
+		stream << GetResource(map_icon[2], res_mesh) << " ";
+		stream << map_icon[3] << " ";
+		stream << GetId(map_icon[4]) << " ";
 
 		int trigger_pos;
 
 		if (map_icon.Len() > 7)
 		{
-			stream << map_icon.GetItem(5) << " ";
-			stream << map_icon.GetItem(6) << " ";
-			stream << map_icon.GetItem(7) << " ";
+			stream << map_icon[5] << " ";
+			stream << map_icon[6] << " ";
+			stream << map_icon[7] << " ";
 			trigger_pos = 8;
 		}
 		else
@@ -855,7 +944,7 @@ void ModuleSystem::WriteMapIcons()
 		}
 
 		if (map_icon.Len() > trigger_pos)
-			WriteSimpleTriggerBlock(map_icon.GetItem(trigger_pos), stream);
+			WriteSimpleTriggerBlock(map_icon[trigger_pos], stream);
 		else
 			stream << "0 ";
 
@@ -865,7 +954,9 @@ void ModuleSystem::WriteMapIcons()
 
 void ModuleSystem::WriteMenus()
 {
-	std::ofstream stream(m_path + "menus.txt");
+	PrepareModule("game menus");
+
+	std::ofstream stream(m_output_path + "menus.txt");
 	CPyIter iter = m_game_menus.GetIter();
 
 	stream << "menusfile version 1" << std::endl;
@@ -875,13 +966,13 @@ void ModuleSystem::WriteMenus()
 	{
 		CPyObject menu = iter.Next();
 
-		stream << "menu_" << encode_id(menu.GetItem(0).AsString()) << " ";
-		stream << menu.GetItem(1) << " ";
-		stream << encode_str(menu.GetItem(2).AsString()) << " ";
-		stream << encode_str(menu.GetItem(3).AsString()) << " ";
-		WriteStatementBlock(menu.GetItem(4), stream);
+		stream << "menu_" << encode_id(menu[0].AsString()) << " ";
+		stream << menu[1] << " ";
+		stream << encode_str(menu[2].AsString()) << " ";
+		stream << GetResource(menu[3], res_mesh) << " ";
+		WriteStatementBlock(menu[4], stream);
 
-		CPyObject items = menu.GetItem(5);
+		CPyObject items = menu[5];
 		CPyIter item_iter = items.GetIter();
 
 		stream << items.Len() << " ";
@@ -891,13 +982,13 @@ void ModuleSystem::WriteMenus()
 			CPyObject item = item_iter.Next();
 
 			stream << std::endl;
-			stream << "mno_" << encode_id(item.GetItem(0).AsString()) << " ";
-			WriteStatementBlock(item.GetItem(1), stream);
-			stream << encode_str(item.GetItem(2).AsString()) << " ";
-			WriteStatementBlock(item.GetItem(3), stream);
+			stream << "mno_" << encode_id(item[0].AsString()) << " ";
+			WriteStatementBlock(item[1], stream);
+			stream << encode_str(item[2].AsString()) << " ";
+			WriteStatementBlock(item[3], stream);
 			
 			if (item.Len() > 4)
-				stream << encode_str(item.GetItem(4).AsString()) << " ";
+				stream << encode_str(item[4].AsString()) << " ";
 			else
 				stream << ". ";
 		}
@@ -908,7 +999,9 @@ void ModuleSystem::WriteMenus()
 
 void ModuleSystem::WriteMeshes()
 {
-	std::ofstream stream(m_path + "meshes.txt");
+	PrepareModule("meshes");
+
+	std::ofstream stream(m_output_path + "meshes.txt");
 	CPyIter iter = m_meshes.GetIter();
 
 	stream << m_meshes.Size() << std::endl;
@@ -917,25 +1010,27 @@ void ModuleSystem::WriteMeshes()
 	{
 		CPyObject mesh = iter.Next();
 		
-		stream << "mesh_" << encode_id(mesh.GetItem(0).AsString()) << " ";
-		stream << mesh.GetItem(1) << " ";
-		stream << encode_str(mesh.GetItem(2).AsString()) << " ";
-		stream << mesh.GetItem(3) << " ";
-		stream << mesh.GetItem(4) << " ";
-		stream << mesh.GetItem(5) << " ";
-		stream << mesh.GetItem(6) << " ";
-		stream << mesh.GetItem(7) << " ";
-		stream << mesh.GetItem(8) << " ";
-		stream << mesh.GetItem(9) << " ";
-		stream << mesh.GetItem(10) << " ";
-		stream << mesh.GetItem(11) << " ";
+		stream << "mesh_" << encode_id(mesh[0].AsString()) << " ";
+		stream << mesh[1] << " ";
+		stream << GetResource(mesh[2], res_mesh) << " ";
+		stream << mesh[3] << " ";
+		stream << mesh[4] << " ";
+		stream << mesh[5] << " ";
+		stream << mesh[6] << " ";
+		stream << mesh[7] << " ";
+		stream << mesh[8] << " ";
+		stream << mesh[9] << " ";
+		stream << mesh[10] << " ";
+		stream << mesh[11] << " ";
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteMissionTemplates()
 {
-	std::ofstream stream(m_path + "mission_templates.txt");
+	PrepareModule("mission templates");
+
+	std::ofstream stream(m_output_path + "mission_templates.txt");
 	CPyIter iter = m_mission_templates.GetIter();
 
 	stream << "missionsfile version 1" << std::endl;
@@ -945,13 +1040,13 @@ void ModuleSystem::WriteMissionTemplates()
 	{
 		CPyObject mission_template = iter.Next();
 
-		stream << "mst_" << encode_id(mission_template.GetItem(0).AsString()) << " ";
-		stream << encode_id(mission_template.GetItem(0).AsString()) << " ";
-		stream << mission_template.GetItem(1) << " ";
-		stream << mission_template.GetItem(2) << " ";
-		stream << encode_str(mission_template.GetItem(3).AsString()) << " ";
+		stream << "mst_" << encode_id(mission_template[0].AsString()) << " ";
+		stream << encode_id(mission_template[0].AsString()) << " ";
+		stream << mission_template[1] << " ";
+		stream << mission_template[2] << " ";
+		stream << encode_str(mission_template[3].AsString()) << " ";
 
-		CPyObject groups = mission_template.GetItem(4);
+		CPyObject groups = mission_template[4];
 		CPyIter group_iter = groups.GetIter();
 
 		stream << groups.Len() << " ";
@@ -962,15 +1057,15 @@ void ModuleSystem::WriteMissionTemplates()
 
 			stream << std::endl;
 			
-			stream << group.GetItem(0) << " ";
-			stream << group.GetItem(1) << " ";
-			stream << group.GetItem(2) << " ";
-			stream << group.GetItem(3) << " ";
-			stream << group.GetItem(4) << " ";
+			stream << group[0] << " ";
+			stream << group[1] << " ";
+			stream << group[2] << " ";
+			stream << group[3] << " ";
+			stream << group[4] << " ";
 
 			if (group.Len() > 5)
 			{
-				CPyObject overrides = group.GetItem(5);
+				CPyObject overrides = group[5];
 				int num_overrides = overrides.Len();
 
 				if (num_overrides > 8)
@@ -983,7 +1078,7 @@ void ModuleSystem::WriteMissionTemplates()
 
 				for (int i = 0; i < num_overrides; ++i)
 				{
-					stream << overrides.GetItem(i) << " ";
+					stream << overrides[i] << " ";
 				}
 			}
 			else
@@ -993,14 +1088,16 @@ void ModuleSystem::WriteMissionTemplates()
 		}
 		
 		stream << std::endl;
-		WriteTriggerBlock(mission_template.GetItem(5), stream);
+		WriteTriggerBlock(mission_template[5], stream);
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteMusic()
 {
-	std::ofstream stream(m_path + "music.txt");
+	PrepareModule("music tracks");
+
+	std::ofstream stream(m_output_path + "music.txt");
 	CPyIter iter = m_music.GetIter();
 
 	stream << m_music.Size() << std::endl;
@@ -1008,10 +1105,10 @@ void ModuleSystem::WriteMusic()
 	while (iter.HasNext())
 	{
 		CPyObject track = iter.Next();
-		unsigned long long flags = track.GetItem(2).AsLong();
-		unsigned long long continue_flags = track.GetItem(3).AsLong();
+		unsigned long long flags = track[2].AsLong();
+		unsigned long long continue_flags = track[3].AsLong();
 		
-		stream << encode_str(track.GetItem(1).AsString()) << " ";
+		stream << encode_str(track[1].AsString()) << " ";
 		stream << flags << " ";
 		stream << (flags | continue_flags) << " ";
 		stream << std::endl;
@@ -1020,7 +1117,9 @@ void ModuleSystem::WriteMusic()
 
 void ModuleSystem::WriteParticleSystems()
 {
-	std::ofstream stream(m_path + "particle_systems.txt");
+	PrepareModule("particle systems");
+
+	std::ofstream stream(m_output_path + "particle_systems.txt");
 	CPyIter iter = m_particle_systems.GetIter();
 
 	stream << "particle_systemsfile version 1" << std::endl;
@@ -1030,47 +1129,47 @@ void ModuleSystem::WriteParticleSystems()
 	{
 		CPyObject particle_system = iter.Next();
 		
-		stream << "psys_" << encode_id(particle_system.GetItem(0).AsString()) << " ";
-		stream << particle_system.GetItem(1) << " ";
-		stream << encode_str(particle_system.GetItem(2).AsString()) << " ";
-		stream << particle_system.GetItem(3) << " ";
-		stream << particle_system.GetItem(4) << " ";
-		stream << particle_system.GetItem(5) << " ";
-		stream << particle_system.GetItem(6) << " ";
-		stream << particle_system.GetItem(7) << " ";
-		stream << particle_system.GetItem(8) << " ";
+		stream << "psys_" << encode_id(particle_system[0].AsString()) << " ";
+		stream << particle_system[1] << " ";
+		stream << GetResource(particle_system[2], res_mesh) << " ";
+		stream << particle_system[3] << " ";
+		stream << particle_system[4] << " ";
+		stream << particle_system[5] << " ";
+		stream << particle_system[6] << " ";
+		stream << particle_system[7] << " ";
+		stream << particle_system[8] << " ";
 
 		for (int i = 0; i < 10; i += 2)
 		{
-			CPyObject key1 = particle_system.GetItem(i + 9);
-			CPyObject key2 = particle_system.GetItem(i + 10);
+			CPyObject key1 = particle_system[i + 9];
+			CPyObject key2 = particle_system[i + 10];
 			
-			stream << key1.GetItem(0) << " ";
-			stream << key1.GetItem(1) << " ";
-			stream << key2.GetItem(0) << " ";
-			stream << key2.GetItem(1) << " ";
+			stream << key1[0] << " ";
+			stream << key1[1] << " ";
+			stream << key2[0] << " ";
+			stream << key2[1] << " ";
 		}
 
-		CPyObject emit_box_size = particle_system.GetItem(19);
+		CPyObject emit_box_size = particle_system[19];
 		
-		stream << emit_box_size.GetItem(0) << " ";
-		stream << emit_box_size.GetItem(1) << " ";
-		stream << emit_box_size.GetItem(2) << " ";
+		stream << emit_box_size[0] << " ";
+		stream << emit_box_size[1] << " ";
+		stream << emit_box_size[2] << " ";
 
-		CPyObject emit_velocity = particle_system.GetItem(20);
+		CPyObject emit_velocity = particle_system[20];
 		
-		stream << emit_velocity.GetItem(0) << " ";
-		stream << emit_velocity.GetItem(1) << " ";
-		stream << emit_velocity.GetItem(2) << " ";
-		stream << particle_system.GetItem(21) << " ";
+		stream << emit_velocity[0] << " ";
+		stream << emit_velocity[1] << " ";
+		stream << emit_velocity[2] << " ";
+		stream << particle_system[21] << " ";
 
 		if (particle_system.Len() > 22)
-			stream << particle_system.GetItem(22) << " ";
+			stream << particle_system[22] << " ";
 		else
 			stream << "0.0 ";
 
 		if (particle_system.Len() > 23)
-			stream << particle_system.GetItem(23) << " ";
+			stream << particle_system[23] << " ";
 		else
 			stream << "0.0 ";
 
@@ -1080,7 +1179,9 @@ void ModuleSystem::WriteParticleSystems()
 
 void ModuleSystem::WriteParties()
 {
-	std::ofstream stream(m_path + "parties.txt");
+	PrepareModule("parties");
+
+	std::ofstream stream(m_output_path + "parties.txt");
 	CPyIter iter = m_parties.GetIter();
 	int i = 0;
 
@@ -1093,29 +1194,29 @@ void ModuleSystem::WriteParties()
 		CPyObject party = iter.Next();
 
 		stream << 1 << " " << i << " " << i++ << " ";
-		stream << "p_" << encode_id(party.GetItem(0).AsString()) << " ";
-		stream << encode_str(party.GetItem(1).AsString()) << " ";
-		stream << party.GetItem(2) << " ";
-		stream << GetId(party.GetItem(3)) << " "; // TODO: restrict to menu, etc...
-		stream << party.GetItem(4) << " ";
-		stream << party.GetItem(5) << " ";
-		stream << party.GetItem(6) << " ";
-		stream << party.GetItem(6) << " ";
-		stream << party.GetItem(7) << " ";
-		stream << GetId(party.GetItem(8)) << " ";
-		stream << GetId(party.GetItem(8)) << " ";
+		stream << "p_" << encode_id(party[0].AsString()) << " ";
+		stream << encode_str(party[1].AsString()) << " ";
+		stream << party[2] << " ";
+		stream << GetId(party[3]) << " "; // TODO: restrict to menu, etc...
+		stream << party[4] << " ";
+		stream << party[5] << " ";
+		stream << party[6] << " ";
+		stream << party[6] << " ";
+		stream << party[7] << " ";
+		stream << GetId(party[8]) << " ";
+		stream << GetId(party[8]) << " ";
 
-		CPyObject position = party.GetItem(9);
+		CPyObject position = party[9];
 		
-		stream << position.GetItem(0) << " ";
-		stream << position.GetItem(1) << " ";
-		stream << position.GetItem(0) << " ";
-		stream << position.GetItem(1) << " ";
-		stream << position.GetItem(0) << " ";
-		stream << position.GetItem(1) << " ";
+		stream << position[0] << " ";
+		stream << position[1] << " ";
+		stream << position[0] << " ";
+		stream << position[1] << " ";
+		stream << position[0] << " ";
+		stream << position[1] << " ";
 		stream << "0.0 ";
 
-		CPyObject members = party.GetItem(10);
+		CPyObject members = party[10];
 		CPyIter member_iter = members.GetIter();
 
 		stream << members.Len() << " ";
@@ -1124,14 +1225,14 @@ void ModuleSystem::WriteParties()
 		{
 			CPyObject member = member_iter.Next();
 			
-			stream << member.GetItem(0) << " ";
-			stream << member.GetItem(1) << " ";
+			stream << member[0] << " ";
+			stream << member[1] << " ";
 			stream << "0 ";
-			stream << member.GetItem(2) << " ";
+			stream << member[2] << " ";
 		}
 
 		if (party.Len() > 11)
-			stream << std::setprecision(7) << (3.1415926 / 180.0) * party.GetItem(11).AsFloat() << " ";
+			stream << std::setprecision(7) << (3.1415926 / 180.0) * party[11].AsFloat() << " ";
 		else
 			stream << "0.0 ";
 
@@ -1141,7 +1242,9 @@ void ModuleSystem::WriteParties()
 
 void ModuleSystem::WritePartyTemplates()
 {
-	std::ofstream stream(m_path + "party_templates.txt");
+	PrepareModule("party templates");
+
+	std::ofstream stream(m_output_path + "party_templates.txt");
 	CPyIter iter = m_party_templates.GetIter();
 
 	stream << "partytemplatesfile version 1" << std::endl;
@@ -1151,14 +1254,14 @@ void ModuleSystem::WritePartyTemplates()
 	{
 		CPyObject party_template = iter.Next();
 
-		stream << "pt_" << encode_id(party_template.GetItem(0).AsString()) << " ";
-		stream << encode_str(party_template.GetItem(1).AsString()) << " ";
-		stream << party_template.GetItem(2) << " ";
-		stream << party_template.GetItem(3) << " ";
-		stream << party_template.GetItem(4) << " ";
-		stream << party_template.GetItem(5) << " ";
+		stream << "pt_" << encode_id(party_template[0].AsString()) << " ";
+		stream << encode_str(party_template[1].AsString()) << " ";
+		stream << party_template[2] << " ";
+		stream << party_template[3] << " ";
+		stream << party_template[4] << " ";
+		stream << party_template[5] << " ";
 
-		CPyObject members = party_template.GetItem(6);
+		CPyObject members = party_template[6];
 		int num_members = members.Len();
 
 		if (num_members > 6) // TODO: print where
@@ -1169,14 +1272,14 @@ void ModuleSystem::WritePartyTemplates()
 
 		for (int i = 0; i < num_members; ++i)
 		{
-			CPyObject member = members.GetItem(i);
+			CPyObject member = members[i];
 			
-			stream << member.GetItem(0) << " ";
-			stream << member.GetItem(1) << " ";
-			stream << member.GetItem(2) << " ";
+			stream << member[0] << " ";
+			stream << member[1] << " ";
+			stream << member[2] << " ";
 
 			if (member.Len() > 3)
-				stream << member.GetItem(3) << " ";
+				stream << member[3] << " ";
 			else
 				stream << "0 ";
 		}
@@ -1192,7 +1295,9 @@ void ModuleSystem::WritePartyTemplates()
 
 void ModuleSystem::WritePostEffects()
 {
-	std::ofstream stream(m_path + "postfx.txt");
+	PrepareModule("post effects");
+
+	std::ofstream stream(m_output_path + "postfx.txt");
 	CPyIter iter = m_postfx.GetIter();
 
 	stream << "postfx_paramsfile version 1" << std::endl;
@@ -1202,18 +1307,18 @@ void ModuleSystem::WritePostEffects()
 	{
 		CPyObject effect = iter.Next();
 		
-		stream << "pfx_" << encode_id(effect.GetItem(0).AsString()) << " ";
-		stream << effect.GetItem(1) << " ";
-		stream << effect.GetItem(2) << " ";
+		stream << "pfx_" << encode_id(effect[0].AsString()) << " ";
+		stream << effect[1] << " ";
+		stream << effect[2] << " ";
 
 		for (int i = 0; i < 3; ++i)
 		{
-			CPyObject params = effect.GetItem(i + 3);
+			CPyObject params = effect[i + 3];
 			
-			stream << params.GetItem(0) << " ";
-			stream << params.GetItem(1) << " ";
-			stream << params.GetItem(2) << " ";
-			stream << params.GetItem(3) << " ";
+			stream << params[0] << " ";
+			stream << params[1] << " ";
+			stream << params[2] << " ";
+			stream << params[3] << " ";
 		}
 
 		stream << std::endl;
@@ -1222,7 +1327,9 @@ void ModuleSystem::WritePostEffects()
 
 void ModuleSystem::WritePresentations()
 {
-	std::ofstream stream(m_path + "presentations.txt");
+	PrepareModule("presentations");
+
+	std::ofstream stream(m_output_path + "presentations.txt");
 	CPyIter iter = m_presentations.GetIter();
 
 	stream << "presentationsfile version 1" << std::endl;
@@ -1232,17 +1339,19 @@ void ModuleSystem::WritePresentations()
 	{
 		CPyObject presentation = iter.Next();
 		
-		stream << "prsnt_" << encode_id(presentation.GetItem(0).AsString()) << " ";
-		stream << presentation.GetItem(1) << " ";
-		stream << GetId(presentation.GetItem(2)) << " ";
-		WriteSimpleTriggerBlock(presentation.GetItem(3), stream);
+		stream << "prsnt_" << encode_id(presentation[0].AsString()) << " ";
+		stream << presentation[1] << " ";
+		stream << GetId(presentation[2]) << " ";
+		WriteSimpleTriggerBlock(presentation[3], stream);
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteQuests()
 {
-	std::ofstream stream(m_path + "quests.txt");
+	PrepareModule("quests");
+
+	std::ofstream stream(m_output_path + "quests.txt");
 	CPyIter iter = m_quests.GetIter();
 
 	stream << "questsfile version 1" << std::endl;
@@ -1252,17 +1361,19 @@ void ModuleSystem::WriteQuests()
 	{
 		CPyObject quest = iter.Next();
 		
-		stream << "qst_" << encode_id(quest.GetItem(0).AsString()) << " ";
-		stream << encode_str(quest.GetItem(1).AsString()) << " ";
-		stream << quest.GetItem(2) << " ";
-		stream << encode_str(quest.GetItem(3).AsString()) << " ";
+		stream << "qst_" << encode_id(quest[0].AsString()) << " ";
+		stream << encode_str(quest[1].AsString()) << " ";
+		stream << quest[2] << " ";
+		stream << encode_str(quest[3].AsString()) << " ";
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteQuickStrings()
 {
-	std::ofstream stream(m_path + "quick_strings.txt");
+	PrepareModule("quick strings");
+
+	std::ofstream stream(m_output_path + "quick_strings.txt");
 	std::vector<std::string> quick_strings(m_quick_strings.size());
 	std::map<std::string, QuickString>::const_iterator it;
 
@@ -1282,10 +1393,9 @@ void ModuleSystem::WriteQuickStrings()
 
 void ModuleSystem::WriteSceneProps()
 {
-	CPyModule header_items("header_scene_props");
-	CPyObject get_spr_hit_points = header_items.GetAttr("get_spr_hit_points");
+	PrepareModule("scene props");
 
-	std::ofstream stream(m_path + "scene_props.txt");
+	std::ofstream stream(m_output_path + "scene_props.txt");
 	CPyIter iter = m_scene_props.GetIter();
 
 	stream << "scene_propsfile version 1" << std::endl;
@@ -1295,24 +1405,22 @@ void ModuleSystem::WriteSceneProps()
 	{
 		CPyObject scene_prop = iter.Next();
 		
-		stream << "spr_" << encode_strip(scene_prop.GetItem(0).AsString()) << " ";
-		stream << scene_prop.GetItem(1) << " ";
-
-		CPyTuple args(1);
-
-		args.SetItem(0, scene_prop.GetItem(1));
-		stream << get_spr_hit_points.Call(args) << " ";
-		stream << encode_str(scene_prop.GetItem(2).Str()) << " ";
-		stream << encode_str(scene_prop.GetItem(3).Str()) << " ";
+		stream << "spr_" << encode_strip(scene_prop[0].AsString()) << " ";
+		stream << scene_prop[1] << " ";
+		stream << (((unsigned long)scene_prop[1].AsLong() >> 20) & 0xFF) << " ";
+		stream << GetResource(scene_prop[2], res_mesh) << " ";
+		stream << GetResource(scene_prop[3], res_body) << " ";
 		stream << std::endl;
-		WriteSimpleTriggerBlock(scene_prop.GetItem(4), stream);
+		WriteSimpleTriggerBlock(scene_prop[4], stream);
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteScenes()
 {
-	std::ofstream stream(m_path + "scenes.txt");
+	PrepareModule("scenes");
+
+	std::ofstream stream(m_output_path + "scenes.txt");
 	CPyIter iter = m_scenes.GetIter();
 
 	stream << "scenesfile version 1" << std::endl;
@@ -1322,19 +1430,19 @@ void ModuleSystem::WriteScenes()
 	{
 		CPyObject scene = iter.Next();
 
-		stream << "scn_" << encode_id(scene.GetItem(0).AsString()) << " ";
-		stream << encode_str(scene.GetItem(0).AsString()) << " ";
-		stream << scene.GetItem(1) << " ";
-		stream << scene.GetItem(2) << " ";
-		stream << scene.GetItem(3) << " ";
-		stream << scene.GetItem(4).GetItem(0) << " ";
-		stream << scene.GetItem(4).GetItem(1) << " ";
-		stream << scene.GetItem(5).GetItem(0) << " ";
-		stream << scene.GetItem(5).GetItem(1) << " ";
-		stream << scene.GetItem(6) << " ";
-		stream << scene.GetItem(7) << " ";
+		stream << "scn_" << encode_id(scene[0].AsString()) << " ";
+		stream << encode_str(scene[0].AsString()) << " ";
+		stream << scene[1] << " ";
+		stream << GetResource(scene[2], res_mesh) << " ";
+		stream << GetResource(scene[3], res_body) << " ";
+		stream << scene[4][0] << " ";
+		stream << scene[4][1] << " ";
+		stream << scene[5][0] << " ";
+		stream << scene[5][1] << " ";
+		stream << scene[6] << " ";
+		stream << scene[7] << " ";
 
-		CPyObject passages = scene.GetItem(8);
+		CPyObject passages = scene[8];
 		CPyIter passage_iter = passages.GetIter();
 
 		stream << passages.Len() << " ";
@@ -1364,7 +1472,7 @@ void ModuleSystem::WriteScenes()
 			stream << scene_id << " ";
 		}
 
-		CPyObject chests = scene.GetItem(9);
+		CPyObject chests = scene[9];
 		CPyIter chest_iter = chests.GetIter();
 
 		stream << chests.Len() << " ";
@@ -1383,7 +1491,7 @@ void ModuleSystem::WriteScenes()
 		}
 
 		if (scene.Len() > 10)
-			stream << scene.GetItem(10) << " ";
+			stream << scene[10] << " ";
 		else
 			stream << "0 ";
 
@@ -1393,24 +1501,26 @@ void ModuleSystem::WriteScenes()
 
 void ModuleSystem::WriteScripts()
 {
-	std::ofstream stream(m_path + "scripts.txt");
+	PrepareModule("scripts");
+
+	std::ofstream stream(m_output_path + "scripts.txt");
 	CPyIter iter = m_scripts.GetIter();
 	int num_scripts = m_scripts.Size();
 
 	stream << "scriptsfile version 1" << std::endl;
 	stream << num_scripts << std::endl;
-
+	
 	for (int i = 0; i < num_scripts; ++i)
 	{
-		CPyObject script = m_scripts.GetItem(i);
-		std::string name = script.GetItem(0).AsString();
+		CPyObject script = m_scripts[i];
+		std::string name = script[0].AsString();
 		
 		if ((m_flags & msf_obfuscate_scripts) && name.substr(0, 5) != "game_")
 			stream << "script_" << i << " ";
 		else
 			stream << encode_id(name) << " ";
 
-		CPyObject obj = script.GetItem(1);
+		CPyObject obj = script[1];
 
 		if (obj.IsTuple() || obj.IsList())
 		{
@@ -1420,7 +1530,7 @@ void ModuleSystem::WriteScripts()
 		else
 		{
 			stream << obj << " ";
-			WriteStatementBlock(script.GetItem(2), stream);
+			WriteStatementBlock(script[2], stream);
 		}
 
 		stream << std::endl;
@@ -1429,7 +1539,9 @@ void ModuleSystem::WriteScripts()
 
 void ModuleSystem::WriteSimpleTriggers()
 {
-	std::ofstream stream(m_path + "simple_triggers.txt");
+	PrepareModule("simple triggers");
+
+	std::ofstream stream(m_output_path + "simple_triggers.txt");
 
 	stream << "simple_triggers_file version 1" << std::endl;
 	WriteSimpleTriggerBlock(m_simple_triggers, stream);
@@ -1437,7 +1549,9 @@ void ModuleSystem::WriteSimpleTriggers()
 
 void ModuleSystem::WriteSkills()
 {
-	std::ofstream stream(m_path + "skills.txt");
+	PrepareModule("skills");
+
+	std::ofstream stream(m_output_path + "skills.txt");
 	CPyIter iter = m_skills.GetIter();
 
 	stream << m_skills.Size() << std::endl;
@@ -1446,18 +1560,20 @@ void ModuleSystem::WriteSkills()
 	{
 		CPyObject skill = iter.Next();
 		
-		stream << "skl_" << encode_id(skill.GetItem(0).AsString()) << " ";
-		stream << encode_str(skill.GetItem(1).AsString()) << " ";
-		stream << skill.GetItem(2) << " ";
-		stream << skill.GetItem(3) << " ";
-		stream << encode_str(skill.GetItem(4).AsString()) << " ";
+		stream << "skl_" << encode_id(skill[0].AsString()) << " ";
+		stream << encode_str(skill[1].AsString()) << " ";
+		stream << skill[2] << " ";
+		stream << skill[3] << " ";
+		stream << encode_str(skill[4].AsString()) << " ";
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteSkins()
 {
-	std::ofstream stream(m_path + "skins.txt");
+	PrepareModule("skins");
+
+	std::ofstream stream(m_output_path + "skins.txt");
 	int num_skins = m_skins.Size();
 
 	if (num_skins > 16)
@@ -1471,16 +1587,16 @@ void ModuleSystem::WriteSkins()
 
 	for (int i = 0; i < num_skins; ++i)
 	{
-		CPyObject skin = m_skins.GetItem(i);
+		CPyObject skin = m_skins[i];
 		
-		stream << encode_id(skin.GetItem(0).AsString()) << " ";
-		stream << skin.GetItem(1) << " ";
-		stream << skin.GetItem(2) << " ";
-		stream << skin.GetItem(3) << " ";
-		stream << skin.GetItem(4) << " ";
-		stream << skin.GetItem(5) << " ";
+		stream << encode_id(skin[0].AsString()) << " ";
+		stream << skin[1] << " ";
+		stream << GetResource(skin[2], res_mesh) << " ";
+		stream << GetResource(skin[3], res_mesh) << " ";
+		stream << GetResource(skin[4], res_mesh) << " ";
+		stream << GetResource(skin[5], res_mesh) << " ";
 
-		CPyObject face_keys = skin.GetItem(6);
+		CPyObject face_keys = skin[6];
 		CPyIter face_key_iter = face_keys.GetIter();
 
 		stream << face_keys.Len() << " ";
@@ -1489,55 +1605,55 @@ void ModuleSystem::WriteSkins()
 		{
 			CPyObject face_key = face_key_iter.Next();
 
-			stream << "skinkey_" << encode_id(face_key.GetItem(4).AsString()) << " ";
-			stream << face_key.GetItem(0) << " ";
-			stream << face_key.GetItem(1) << " ";
-			stream << face_key.GetItem(2) << " ";
-			stream << face_key.GetItem(3) << " ";
-			stream << encode_str(face_key.GetItem(4).AsString()) << " ";
+			stream << "skinkey_" << encode_id(face_key[4].AsString()) << " ";
+			stream << face_key[0] << " ";
+			stream << face_key[1] << " ";
+			stream << face_key[2] << " ";
+			stream << face_key[3] << " ";
+			stream << encode_str(face_key[4].AsString()) << " ";
 		}
 
-		CPyObject hair_meshes = skin.GetItem(7);
+		CPyObject hair_meshes = skin[7];
 		CPyIter hair_mesh_iter = hair_meshes.GetIter();
 
 		stream << hair_meshes.Len() << " ";
 
 		while (hair_mesh_iter.HasNext())
 		{
-			stream << hair_mesh_iter.Next() << " ";
+			stream << GetResource(hair_mesh_iter.Next(), res_mesh) << " ";
 		}
 
-		CPyObject beard_meshes = skin.GetItem(8);
+		CPyObject beard_meshes = skin[8];
 		CPyIter beard_mesh_iter = beard_meshes.GetIter();
 
 		stream << beard_meshes.Len() << " ";
 
 		while (beard_mesh_iter.HasNext())
 		{
-			stream << beard_mesh_iter.Next() << " ";
+			stream << GetResource(beard_mesh_iter.Next(), res_mesh) << " ";
 		}
 
-		CPyObject hair_textures = skin.GetItem(9);
-		CPyIter hair_texture_iter = hair_textures.GetIter();
+		CPyObject hair_materials = skin[9];
+		CPyIter hair_material_iter = hair_materials.GetIter();
 
-		stream << hair_textures.Len() << " ";
+		stream << hair_materials.Len() << " ";
 
-		while (hair_texture_iter.HasNext())
+		while (hair_material_iter.HasNext())
 		{
-			stream << hair_texture_iter.Next() << " ";
+			stream << GetResource(hair_material_iter.Next(), res_material) << " ";
 		}
 
-		CPyObject beard_textures = skin.GetItem(10);
-		CPyIter beard_texture_iter = beard_textures.GetIter();
+		CPyObject beard_materials = skin[10];
+		CPyIter beard_material_iter = beard_materials.GetIter();
 
-		stream << beard_textures.Len() << " ";
+		stream << beard_materials.Len() << " ";
 
-		while (beard_texture_iter.HasNext())
+		while (beard_material_iter.HasNext())
 		{
-			stream << beard_texture_iter.Next() << " ";
+			stream << GetResource(beard_material_iter.Next(), res_material) << " ";
 		}
 
-		CPyObject face_textures = skin.GetItem(11);
+		CPyObject face_textures = skin[11];
 		CPyIter face_texture_iter = face_textures.GetIter();
 
 		stream << face_textures.Len() << " ";
@@ -1546,8 +1662,8 @@ void ModuleSystem::WriteSkins()
 		{
 			CPyObject face_texture = face_texture_iter.Next();
 			
-			stream << face_texture.GetItem(0) << " ";
-			stream << face_texture.GetItem(1) << " ";
+			stream << GetResource(face_texture[0], res_material) << " ";
+			stream << face_texture[1] << " ";
 			
 			CPyObject hair_materials;
 			CPyObject hair_colors;
@@ -1556,12 +1672,12 @@ void ModuleSystem::WriteSkins()
 
 			if (face_texture.Len() > 2)
 			{
-				hair_materials = face_texture.GetItem(2);
+				hair_materials = face_texture[2];
 				num_hair_materials = hair_materials.Len();
 
 				if (face_texture.Len() > 3)
 				{
-					hair_colors = face_texture.GetItem(3);
+					hair_colors = face_texture[3];
 					num_hair_colors = hair_colors.Len();
 				}
 			}
@@ -1571,16 +1687,16 @@ void ModuleSystem::WriteSkins()
 
 			for (int i = 0; i < num_hair_materials; ++i)
 			{
-				stream << encode_str(hair_materials.GetItem(i).Str()) << " ";
+				stream << GetResource(hair_materials[i], res_material) << " ";
 			}
 
 			for (int i = 0; i < num_hair_colors; ++i)
 			{
-				stream << hair_colors.GetItem(i) << " ";
+				stream << hair_colors[i] << " ";
 			}
 		}
 
-		CPyObject voices = skin.GetItem(12);
+		CPyObject voices = skin[12];
 		CPyIter voice_iter = voices.GetIter();
 
 		stream << voices.Len() << " ";
@@ -1589,26 +1705,26 @@ void ModuleSystem::WriteSkins()
 		{
 			CPyObject voice = voice_iter.Next();
 
-			stream << voice.GetItem(0) << " ";
-			stream << encode_id(voice.GetItem(1).Str()) << " ";
+			stream << voice[0] << " ";
+			stream << encode_id(voice[1].Str()) << " ";
 		}
 
-		stream << skin.GetItem(13) << " ";
-		stream << skin.GetItem(14) << " ";
+		stream << GetResource(skin[13], res_skeleton) << " ";
+		stream << skin[14] << " ";
 
 		if (skin.Len() > 15)
-			stream << GetId(skin.GetItem(15)) << " ";
+			stream << GetId(skin[15]) << " ";
 		else
 			stream << "0 ";
 
 		if (skin.Len() > 16)
-			stream << GetId(skin.GetItem(16)) << " ";
+			stream << GetId(skin[16]) << " ";
 		else
 			stream << "0 ";
 
 		if (skin.Len() > 17)
 		{
-			CPyObject constraints = skin.GetItem(17);
+			CPyObject constraints = skin[17];
 			CPyIter constraint_iter = constraints.GetIter();
 
 			stream << constraints.Len() << " ";
@@ -1617,8 +1733,8 @@ void ModuleSystem::WriteSkins()
 			{
 				CPyObject constraint = constraint_iter.Next();
 				
-				stream << constraint.GetItem(0) << " ";
-				stream << constraint.GetItem(1) << " ";
+				stream << constraint[0] << " ";
+				stream << constraint[1] << " ";
 
 				int num_pairs = constraint.Len() - 2;
 
@@ -1626,10 +1742,10 @@ void ModuleSystem::WriteSkins()
 
 				for (int i = 0; i < num_pairs; ++i)
 				{
-					CPyObject pair = constraint.GetItem(i + 2);
+					CPyObject pair = constraint[i + 2];
 
-					stream << pair.GetItem(0) << " ";
-					stream << pair.GetItem(1) << " ";
+					stream << pair[0] << " ";
+					stream << pair[1] << " ";
 				}
 			}
 		}
@@ -1644,7 +1760,9 @@ void ModuleSystem::WriteSkins()
 
 void ModuleSystem::WriteSounds()
 {
-	std::ofstream stream(m_path + "sounds.txt");
+	PrepareModule("sounds");
+
+	std::ofstream stream(m_output_path + "sounds.txt");
 	CPyIter iter = m_sounds.GetIter();
 	std::map<std::string, int> samples;
 	std::vector<std::string> samples_vec;
@@ -1653,7 +1771,7 @@ void ModuleSystem::WriteSounds()
 	while (iter.HasNext())
 	{
 		CPyObject sound = iter.Next();
-		CPyObject sound_files = sound.GetItem(2);
+		CPyObject sound_files = sound[2];
 		CPyIter sound_file_iter = sound_files.GetIter();
 
 		while (sound_file_iter.HasNext())
@@ -1662,7 +1780,7 @@ void ModuleSystem::WriteSounds()
 			std::string file;
 
 			if (sound_file.IsTuple() || sound_file.IsList())
-				file = sound_file.GetItem(0).AsString();
+				file = sound_file[0].AsString();
 			else
 				file = sound_file.AsString();
 
@@ -1670,7 +1788,7 @@ void ModuleSystem::WriteSounds()
 			{
 				samples[file] = samples_vec.size();
 				samples_vec.push_back(file);
-				sample_flags.push_back(sound.GetItem(1).AsLong());
+				sample_flags.push_back(sound[1].AsLong());
 			}
 		}
 	}
@@ -1693,10 +1811,10 @@ void ModuleSystem::WriteSounds()
 	{
 		CPyObject sound = iter.Next();
 		
-		stream << "snd_" << encode_id(sound.GetItem(0).AsString()) << " ";
-		stream << sound.GetItem(1) << " ";
+		stream << "snd_" << encode_id(sound[0].AsString()) << " ";
+		stream << sound[1] << " ";
 
-		CPyObject sound_files = sound.GetItem(2);
+		CPyObject sound_files = sound[2];
 		int num_samples = sound_files.Len();
 		
 		stream << num_samples << " ";
@@ -1709,14 +1827,14 @@ void ModuleSystem::WriteSounds()
 
 		for (int i = 0; i < num_samples; ++i)
 		{
-			CPyObject sound_file = sound_files.GetItem(i);
+			CPyObject sound_file = sound_files[i];
 			std::string file;
 			unsigned long flags;
 
 			if (sound_file.IsTuple() || sound_file.IsList())
 			{
-				file = sound_file.GetItem(0).AsString();
-				flags = sound_file.GetItem(1).AsLong();
+				file = sound_file[0].AsString();
+				flags = sound_file[1].AsLong();
 			}
 			else
 			{
@@ -1733,7 +1851,9 @@ void ModuleSystem::WriteSounds()
 
 void ModuleSystem::WriteStrings()
 {
-	std::ofstream stream(m_path + "strings.txt");
+	PrepareModule("strings");
+
+	std::ofstream stream(m_output_path + "strings.txt");
 	CPyIter iter = m_strings.GetIter();
 	
 	stream << "stringsfile version 1" << std::endl;
@@ -1743,15 +1863,17 @@ void ModuleSystem::WriteStrings()
 	{
 		CPyObject string = iter.Next();
 		
-		stream << "str_" << encode_id(string.GetItem(0).AsString()) << " ";
-		stream << encode_str(string.GetItem(1).AsString()) << " ";
+		stream << "str_" << encode_id(string[0].AsString()) << " ";
+		stream << encode_str(string[1].AsString()) << " ";
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteTableaus()
 {
-	std::ofstream stream(m_path + "tableau_materials.txt");
+	PrepareModule("tableau materials");
+
+	std::ofstream stream(m_output_path + "tableau_materials.txt");
 	CPyIter iter = m_tableau_materials.GetIter();
 
 	stream << m_tableau_materials.Size() << std::endl;
@@ -1760,23 +1882,25 @@ void ModuleSystem::WriteTableaus()
 	{
 		CPyObject tableau = iter.Next();
 
-		stream << "tab_" << encode_id(tableau.GetItem(0).AsString()) << " ";
-		stream << tableau.GetItem(1) << " ";
-		stream << encode_str(tableau.GetItem(2).AsString()) << " ";
-		stream << tableau.GetItem(3) << " ";
-		stream << tableau.GetItem(4) << " ";
-		stream << tableau.GetItem(5) << " ";
-		stream << tableau.GetItem(6) << " ";
-		stream << tableau.GetItem(7) << " ";
-		stream << tableau.GetItem(8) << " ";
-		WriteStatementBlock(tableau.GetItem(9), stream);
+		stream << "tab_" << encode_id(tableau[0].AsString()) << " ";
+		stream << tableau[1] << " ";
+		stream << GetResource(tableau[2].AsString(), res_material) << " ";
+		stream << tableau[3] << " ";
+		stream << tableau[4] << " ";
+		stream << tableau[5] << " ";
+		stream << tableau[6] << " ";
+		stream << tableau[7] << " ";
+		stream << tableau[8] << " ";
+		WriteStatementBlock(tableau[9], stream);
 		stream << std::endl;
 	}
 }
 
 void ModuleSystem::WriteTriggers()
 {
-	std::ofstream stream(m_path + "triggers.txt");
+	PrepareModule("triggers");
+
+	std::ofstream stream(m_output_path + "triggers.txt");
 
 	stream << "triggersfile version 1" << std::endl;
 	WriteTriggerBlock(m_triggers, stream);
@@ -1784,7 +1908,9 @@ void ModuleSystem::WriteTriggers()
 
 void ModuleSystem::WriteTroops()
 {
-	std::ofstream stream(m_path + "troops.txt");
+	PrepareModule("troops");
+
+	std::ofstream stream(m_output_path + "troops.txt");
 	CPyIter iter = m_troops.GetIter();
 
 	stream << "troopsfile version 2" << std::endl;
@@ -1794,36 +1920,36 @@ void ModuleSystem::WriteTroops()
 	{
 		CPyObject troop = iter.Next();
 		
-		stream << "trp_" << encode_id(troop.GetItem(0).AsString()) << " ";
-		stream << encode_str(troop.GetItem(1).AsString()) << " ";
-		stream << encode_str(troop.GetItem(2).AsString()) << " ";
+		stream << "trp_" << encode_id(troop[0].AsString()) << " ";
+		stream << encode_str(troop[1].AsString()) << " ";
+		stream << encode_str(troop[2].AsString()) << " ";
 
 		if (troop.Len() > 13)
-			stream << encode_str(troop.GetItem(13).Str()) << " ";
+			stream << GetResource(troop[13].Str(), res_mesh) << " ";
 		else
 			stream << "0 ";
 
-		stream << troop.GetItem(3) << " ";
-		stream << troop.GetItem(4) << " ";
-		stream << troop.GetItem(5) << " ";
-		stream << GetId(troop.GetItem(6)) << " ";
+		stream << troop[3] << " ";
+		stream << troop[4] << " ";
+		stream << troop[5] << " ";
+		stream << GetId(troop[6]) << " ";
 
 		if (troop.Len() > 14)
-			stream << troop.GetItem(14) << " ";
+			stream << troop[14] << " ";
 		else
 			stream << "0 ";
 
 		if (troop.Len() > 15)
-			stream << troop.GetItem(15) << " ";
+			stream << troop[15] << " ";
 		else
 			stream << "0 ";
 
-		CPyObject items = troop.GetItem(7);
+		CPyObject items = troop[7];
 		int num_items = items.Len();
 
 		for (int i = 0; i < num_items; ++i)
 		{
-			stream << GetId(items.GetItem(i)) << " 0 ";
+			stream << GetId(items[i]) << " 0 ";
 		}
 
 		for (int i = num_items; i < 64; ++i)
@@ -1831,27 +1957,27 @@ void ModuleSystem::WriteTroops()
 			stream << "-1 0 ";
 		}
 
-		CPyNumber attribs = troop.GetItem(8);
+		CPyNumber attribs = troop[8];
 		
-		stream << ((attribs >> CPyNumber(0)) & 0xFF) << " ";
-		stream << ((attribs >> CPyNumber(8)) & 0xFF) << " ";
-		stream << ((attribs >> CPyNumber(16)) & 0xFF) << " ";
-		stream << ((attribs >> CPyNumber(24)) & 0xFF) << " ";
-		stream << ((attribs >> CPyNumber(32)) & 0xFF) << " ";
+		stream << ((attribs >> 0) & 0xFF) << " ";
+		stream << ((attribs >> 8) & 0xFF) << " ";
+		stream << ((attribs >> 16) & 0xFF) << " ";
+		stream << ((attribs >> 24) & 0xFF) << " ";
+		stream << ((attribs >> 32) & 0xFF) << " ";
 
-		CPyNumber proficiencies = troop.GetItem(9).AsNumber();
+		CPyNumber proficiencies = troop[9].AsNumber();
 
 		for (int i = 0; i < 7; ++i)
 		{
 			stream << (proficiencies & 0x3FF) << " ";
-			proficiencies = proficiencies >> CPyNumber(10);
+			proficiencies = proficiencies >> 10;
 		}
 
-		CPyNumber skills = troop.GetItem(10).AsNumber();
+		CPyNumber skills = troop[10].AsNumber();
 
 		for (int i = 0; i < 6; ++i)
 		{
-			stream << ((skills >> CPyNumber(i * 32)) & 0xFFFFFFFF) << " ";
+			stream << ((skills >> (i * 32)) & 0xFFFFFFFF) << " ";
 		}
 
 		for (int i = 0; i < 2; ++i)
@@ -1859,11 +1985,11 @@ void ModuleSystem::WriteTroops()
 			CPyNumber face_key;
 			
 			if (troop.Len() > i + 11)
-				face_key = troop.GetItem(i + 11).AsNumber();
+				face_key = troop[i + 11].AsNumber();
 
 			for (int j = 0; j < 4; ++j)
 			{
-				stream << ((face_key >> CPyNumber((3 - j) * 64)) & 0xFFFFFFFFFFFFFFFF) << " ";
+				stream << ((face_key >> ((3 - j) * 64)) & 0xFFFFFFFFFFFFFFFF) << " ";
 			}
 		}
 
@@ -1885,8 +2011,8 @@ void ModuleSystem::WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block
 
 void ModuleSystem::WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream)
 {
-	stream << simple_trigger.GetItem(0) << " ";
-	WriteStatementBlock(simple_trigger.GetItem(1), stream);
+	stream << simple_trigger[0] << " ";
+	WriteStatementBlock(simple_trigger[1], stream);
 }
 
 void ModuleSystem::WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream)
@@ -1904,11 +2030,11 @@ void ModuleSystem::WriteTriggerBlock(const CPyObject &trigger_block, std::ostrea
 
 void ModuleSystem::WriteTrigger(const CPyObject &trigger, std::ostream &stream)
 {
-	stream << trigger.GetItem(0) << " ";
-	stream << trigger.GetItem(1) << " ";
-	stream << trigger.GetItem(2) << " ";
-	WriteStatementBlock(trigger.GetItem(3), stream);
-	WriteStatementBlock(trigger.GetItem(4), stream);
+	stream << trigger[0] << " ";
+	stream << trigger[1] << " ";
+	stream << trigger[2] << " ";
+	WriteStatementBlock(trigger[3], stream);
+	WriteStatementBlock(trigger[4], stream);
 }
 
 void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream)
@@ -1920,7 +2046,7 @@ void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::os
 
 	for (int i = 0; i < num_statements; ++i)
 	{
-		WriteStatement(statement_block.GetItem(i), stream);
+		WriteStatement(statement_block[i], stream);
 	}
 
 	std::map<std::string, Variable>::const_iterator it;
@@ -1936,7 +2062,7 @@ void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stre
 {
 	if (statement.IsTuple() || statement.IsList())
 	{
-		long long opcode = statement.GetItem(0).AsLong();
+		long long opcode = statement[0].AsLong();
 		int num_operands = statement.Len() - 1;
 
 		stream << opcode << " ";

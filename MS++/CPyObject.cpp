@@ -153,6 +153,11 @@ bool CPyObject::operator !=(const CPyObject& cobj) const
 	return Check3(PyObject_RichCompareBool(m_obj, cobj.m_obj, Py_EQ)) == 0;
 }
 
+const CPyObject CPyObject::operator [](ssize_t pos) const
+{
+	return GetItem(pos);
+}
+
 CPyObject::operator CPyTuple() const
 {
 	return AsTuple();
@@ -278,6 +283,11 @@ CPyModule::CPyModule(PyObject *obj) : CPyObject(obj)
 {
 	if (!PyModule_Check(m_obj))
 		throw CPyException("not a module");
+}
+
+void CPyModule::Reload()
+{
+	m_obj = CheckObj(PyImport_ReloadModule(m_obj));
 }
 
 CPyIter::CPyIter(PyObject *obj) : CPyObject(obj)
@@ -498,9 +508,9 @@ CPyNumber::CPyNumber(PyObject *obj) : CPyObject(obj)
 		throw CPyException("not a numbers");
 }
 
-CPyNumber CPyNumber::operator >>(const CPyNumber &shift)
+CPyNumber CPyNumber::operator >>(int shift)
 {
-	return PyNumber_Rshift(m_obj, shift.m_obj);
+	return PyNumber_Rshift(m_obj, CheckObj(PyLong_FromLong(shift)));
 }
 
 CPyNumber::operator unsigned long long() const

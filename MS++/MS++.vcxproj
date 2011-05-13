@@ -86,10 +86,12 @@
     <ClCompile Include="cMS.cpp" />
     <ClCompile Include="CPyObject.cpp" />
     <ClCompile Include="ModuleSystem.cpp" />
+    <ClCompile Include="StringUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CPyObject.h" />
     <ClInclude Include="ModuleSystem.h" />
+    <ClInclude Include="StringUtils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

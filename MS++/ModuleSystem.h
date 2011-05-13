@@ -1,7 +1,5 @@
 #pragma once
 
-#include "CPyObject.h"
-#include <algorithm>
 #include <ostream>
 #include <fstream>
 #include <iomanip>
@@ -10,6 +8,8 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include "CPyObject.h"
+#include "StringUtils.h"
 
 struct ScriptErrorContext
 {
@@ -49,33 +49,44 @@ private:
 	std::string m_error;
 };
 
-#define OPCODE(obj) ((unsigned long long)obj & opcode_mask)
-#define opcode_mask 0xFFFFFFF
-#define lhs 0x1
-#define ghs 0x2
-#define cf  0x4
+#define OPCODE(obj) ((unsigned long long)obj & 0xFFFFFFF)
+#define optype_lhs 0x1
+#define optype_ghs 0x2
+#define optype_cf  0x4
 #define opmask_register        (1ULL  << 56)
 #define opmask_global_variable (2ULL  << 56)
 #define opmask_local_variable  (17ULL << 56)
 #define opmask_quick_string    (22ULL << 56)
 
+#define res_mesh      1
+#define res_material  2
+#define res_skeleton  3
+#define res_body      4
+#define res_animation 5
+
 #define msf_strict                  0x1
 #define msf_obfuscate_global_vars   0x2
 #define msf_obfuscate_dialog_states 0x4
 #define msf_obfuscate_scripts       0x8
-#define msf_skip_id_files           0x10 // TODO
+#define msf_skip_id_files           0x10
+#define msf_list_resources          0x20
 
 class ModuleSystem
 {
 public:
+	ModuleSystem(const std::string &path);
+	~ModuleSystem();
 	void Compile(unsigned long long flags = 0);
 
 private:
 	void DoCompile();
+	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix);
 	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix);
 	CPyList AddModule(const std::string &module_name, const std::string &prefix);
 	int GetId(const CPyObject &obj);
+	std::string GetResource(const CPyObject &obj, int resource_type);
 	long long ParseOperand(const CPyObject &statement, int pos);
+	void PrepareModule(const std::string &name);
 	void Error(const std::string &text);
 	void Warning(const std::string &text);
 	void WriteAnimations();
@@ -115,7 +126,8 @@ private:
 	void WriteStatement(const CPyObject &statement, std::ostream &stream);
 
 private:
-	std::string m_path;
+	std::string m_input_path;
+	std::string m_output_path;
 	unsigned long long m_flags;
 	std::map<std::string, std::map<std::string, int> > m_ids;
 	CPyList m_animations;
@@ -149,5 +161,7 @@ private:
 	std::map<std::string, Variable> m_global_vars;
 	std::map<std::string, Variable> m_local_vars;
 	std::map<std::string, QuickString> m_quick_strings;
+	std::map<int, std::map<std::string, int> > m_resources;
 	std::vector<std::string> m_warnings;
+	std::string m_cur_module;
 };

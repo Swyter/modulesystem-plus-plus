@@ -41,6 +41,7 @@ public:
 	const CPyObject &operator =(const CPyObject& cobj);
 	bool operator ==(const CPyObject& cobj) const;
 	bool operator !=(const CPyObject& cobj) const;
+	const CPyObject operator [](ssize_t pos) const;
 	operator CPyTuple() const;
 	operator CPyList() const;
 	operator CPyString() const;
@@ -78,6 +79,7 @@ class CPyModule : public CPyObject
 public:
 	CPyModule(const CPyString &name);
 	CPyModule(PyObject *obj);
+	void Reload();
 };
 
 class CPyIter : public CPyObject
@@ -153,6 +155,6 @@ public:
 	CPyNumber();
 	CPyNumber(ssize_t val);
 	CPyNumber(PyObject *obj);
-	CPyNumber operator >>(const CPyNumber &shift);
+	CPyNumber operator >>(int shift);
 	operator unsigned long long() const;
 };
