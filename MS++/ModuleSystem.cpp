@@ -85,9 +85,25 @@ void ModuleSystem::Compile(unsigned long long flags)
 
 	QueryPerformanceCounter(&t2);
 
+	CONSOLE_SCREEN_BUFFER_INFO console_info;
+	HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+
+	GetConsoleScreenBufferInfo(console_handle, &console_info);
+
 	for (size_t i = 0; i < m_warnings.size(); ++i)
 	{
+		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		std::cout << "WARNING: ";
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
 		std::cout << m_warnings[i] << std::endl;
+	}
+
+	for (size_t i = 0; i < m_errors.size(); ++i)
+	{
+		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_INTENSITY);
+		std::cout << "ERROR: ";
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		std::cout << m_errors[i] << std::endl;
 	}
 
 	if (m_flags & msf_list_resources)
@@ -130,7 +146,7 @@ void ModuleSystem::Compile(unsigned long long flags)
 		}
 	}
 
-	std::cout << "Compile time: " << ((t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart) << "ms" << std::endl;
+	std::cout << std::endl << "Compile time: " << ((t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart) << "ms" << std::endl;
 }
 
 void ModuleSystem::DoCompile()
@@ -257,16 +273,17 @@ void ModuleSystem::DoCompile()
 	for (it = m_global_vars.begin(); it != m_global_vars.end(); ++it)
 	{
 		if (!it->second.compat && it->second.assignments == 0)
-			Warning("usage of unassigned global variable $" + it->first);
+			Warning(wl_warning, "usage of unassigned global variable $" + it->first);
 
 		if (!it->second.compat && it->second.usages == 0)
-			Warning("unused global variable $" + it->first);
+			Warning(wl_warning, "unused global variable $" + it->first);
 	}
 };
 
 CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix)
 {
-	CPyModule module("module_" + module_name);
+	std::string module_name_full = "module_" + module_name;
+	CPyModule module(module_name_full);
 	CPyList list = module.GetAttr(list_name);
 
 	if (!prefix.empty())
@@ -282,14 +299,14 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 			if (item.IsTuple() || item.IsList())
 				name = item[0].AsString();
 			else
-				Error("unrecognized list format for " + list_name + " in " + "module_" + module_name);
+				Warning(wl_critical, "unrecognized list format for " + list_name, module_name_full);
 			
 			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
 
 			if (m_ids[prefix].find(name) == m_ids[prefix].end())
 				m_ids[prefix][name] = i;
 			else
-				Warning("duplicate entry in " + module_name + ": " + prefix + "_" + name);
+				Warning(wl_warning, "duplicate entry " + prefix + "_" + name, module_name_full);
 
 			ids[i] = name;
 		}
@@ -318,27 +335,27 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 	return AddModule(module_name, module_name, prefix);
 };
 
-int ModuleSystem::GetId(const CPyObject &obj) // TODO: use
+int ModuleSystem::GetId(const std::string &type, const CPyObject &obj, const std::string &context)
 {
 	if (obj.IsString())
 	{
+		std::string prefix = type;
 		std::string str = obj.AsString();
-		int underscore_pos = str.find('_');
-
-		if (underscore_pos < 0)
-			Error("invalid identifier " + str);
-			
-		std::string prefix = str.substr(0, underscore_pos);
-		std::string value = str.substr(underscore_pos + 1);
+		std::string value;
 		
 		std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
-		std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+		std::transform(str.begin(), str.end(), str.begin(), ::tolower);
+
+		if (str.substr(0, prefix.length()) != prefix)
+			value = str;
+		else
+			value = str.substr(prefix.length() + 1);
 
 		if (m_ids.find(prefix) == m_ids.end())
-			Error("unrecognized identifier type " + prefix);
+			Warning(wl_error, "unrecognized identifier prefix " + prefix, context);
 
 		if (m_ids[prefix].find(value) == m_ids[prefix].end())
-			Error("unrecognized identifier " + str);
+			Warning(wl_error, "unrecognized identifier " + str, context);
 
 		return m_ids[prefix][value];
 	}
@@ -347,11 +364,44 @@ int ModuleSystem::GetId(const CPyObject &obj) // TODO: use
 		return obj.AsLong();
 	}
 	
-	Error("unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str());
+	Warning(wl_critical, "unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str(), context);
 	return -1;
 }
 
-std::string ModuleSystem::GetResource(const CPyObject &obj, int resource_type) // TODO: use
+int ModuleSystem::GetId(const CPyObject &obj, const std::string &context)
+{
+	if (obj.IsString())
+	{
+		std::string str = obj.AsString();
+		int underscore_pos = str.find('_');
+
+		if (underscore_pos < 0)
+			Warning(wl_error, "invalid identifier " + str, context);
+			
+		std::string prefix = str.substr(0, underscore_pos);
+		std::string value = str.substr(underscore_pos + 1);
+		
+		std::transform(prefix.begin(), prefix.end(), prefix.begin(), ::tolower);
+		std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+
+		if (m_ids.find(prefix) == m_ids.end())
+			Warning(wl_error, "unrecognized identifier prefix " + prefix, context);
+
+		if (m_ids[prefix].find(value) == m_ids[prefix].end())
+			Warning(wl_error, "unrecognized identifier " + str, context);
+
+		return m_ids[prefix][value];
+	}
+	else if (obj.IsLong())
+	{
+		return obj.AsLong();
+	}
+	
+	Warning(wl_critical, "unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str(), context);
+	return -1;
+}
+
+std::string ModuleSystem::GetResource(const CPyObject &obj, int resource_type, const std::string &context)
 {
 	if (obj.IsString())
 	{
@@ -372,7 +422,7 @@ std::string ModuleSystem::GetResource(const CPyObject &obj, int resource_type) /
 		return obj.Str();
 	}
 	
-	Error("unrecognized resource type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str());
+	Warning(wl_critical, "unrecognized resource type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str(), context);
 	return "0";
 }
 
@@ -395,13 +445,16 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 			if (m_local_vars.find(value) == m_local_vars.end())
 			{
 				int index = m_local_vars.size();
-
-				if (pos != 1 || !(m_operations[OPCODE(statement[0].AsLong())] & optype_lhs))
-					Warning("usage of unassigned local variable :" + value);
 				
 				m_local_vars[value].index = index;
 				m_local_vars[value].assignments = 1;
 				m_local_vars[value].usages = 0;
+
+				if (pos != 1 || !(m_operations[OPCODE(statement[0].AsLong())] & optype_lhs))
+				{
+					Warning(wl_error, "usage of unassigned local variable :" + value, m_cur_context + ", statement " + itostr(m_cur_statement));
+					m_local_vars[value].usages = 1;
+				}
 			}
 			else
 			{
@@ -482,7 +535,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 		}
 		else
 		{
-			return GetId(operand);
+			return GetId(operand, m_cur_context + ", statement " + itostr(m_cur_statement));
 		}
 	}
 	else if (operand.IsLong())
@@ -490,27 +543,29 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 		return operand.AsLong();
 	}
 	
-	Error("unrecognized operand type " + (std::string)operand.Type().Str() + " for " + (std::string)operand.Str());
+	Warning(wl_critical, "unrecognized operand type " + (std::string)operand.Type().Str() + " for " + (std::string)operand.Str(), m_cur_context + ", statement " + itostr(m_cur_statement));
 	return -1;
 }
 
 void ModuleSystem::PrepareModule(const std::string &name)
 {
-	m_cur_module = name;
-	std::cout << "Exporting " << name << std::endl; // TODO: use m_out_stream instead of cout
+	std::cout << "Exporting " << name << std::endl;
 }
 
-void ModuleSystem::Error(const std::string &text)
+void ModuleSystem::Warning(int level, const std::string &text, const std::string &context)
 {
-	throw CompileException(text);
-}
+	std::string error = text;
 
-void ModuleSystem::Warning(const std::string &text)
-{
-	if (m_flags & msf_strict)
-		Error(text);
+	if (!context.empty())
+		error += " at " + context;
 
-	m_warnings.push_back(text);
+	if (level == wl_critical || (level == wl_error && m_flags & msf_strict))
+		throw CompileException(error);
+	
+	if (level == wl_warning)
+		m_warnings.push_back(error);
+	else if (level == wl_error)
+		m_errors.push_back(error);
 }
 
 void ModuleSystem::WriteAnimations()
@@ -525,8 +580,9 @@ void ModuleSystem::WriteAnimations()
 	while (iter.HasNext())
 	{
 		CPyObject animation = iter.Next();
+		std::string name = encode_str(animation[0].AsString());
 		
-		stream << encode_str(animation[0].AsString()) << " ";
+		stream << name << " ";
 		stream << animation[1] << " ";
 		stream << animation[2] << " ";
 
@@ -540,7 +596,7 @@ void ModuleSystem::WriteAnimations()
 			
 			stream << std::endl;
 			stream << sequence[0] << " ";
-			stream << GetResource(sequence[1], res_animation) << " ";
+			stream << GetResource(sequence[1], res_animation, name) << " ";
 			stream << sequence[2] << " ";
 			stream << sequence[3] << " ";
 			stream << sequence[4] << " ";
@@ -635,9 +691,6 @@ void ModuleSystem::WriteDialogs() // TODO: optimize
 		std::string output_token = sentence[4].AsString();
 		std::string text = encode_str(sentence[3].AsString());
 
-		if (states.find(input_token) == states.end())
-			Error("input token not found: " + input_token);
-
 		std::string auto_id = "dlga_" + encode_id(input_token) + ":" + encode_id(output_token);
 		std::string new_auto_id = auto_id;
 		int i = 1;
@@ -656,17 +709,20 @@ void ModuleSystem::WriteDialogs() // TODO: optimize
 		auto_id = new_auto_id;
 		dialog_ids[auto_id] = text;
 
+		if (states.find(input_token) == states.end())
+			Warning(wl_error, "input token not found: " + input_token, auto_id);
+
 		stream << auto_id << " ";
 		stream << sentence[0] << " ";
 		stream << states[input_token] << " ";
-		WriteStatementBlock(sentence[2], stream);
+		WriteStatementBlock(sentence[2], stream, auto_id);
 
 		if (text.empty())
 			text = "NO_TEXT";
 
 		stream << text << " ";
 		stream << states[output_token] << " ";
-		WriteStatementBlock(sentence[5], stream);
+		WriteStatementBlock(sentence[5], stream, auto_id);
 
 		if (sentence.Len() > 6)
 			stream << encode_str(sentence[6].AsString()) << " ";
@@ -682,51 +738,35 @@ void ModuleSystem::WriteFactions()
 	PrepareModule("factions");
 
 	std::ofstream stream(m_output_path + "factions.txt");
-	CPyIter iter = m_factions.GetIter();
-	
-	std::map<std::string, int> faction_ids;
+	int num_factions = m_factions.Len();
 	std::map<int, std::map<int, double> > relations;
 
-	for (int i = 0; i < m_factions.Len(); ++i)
+	for (int i = 0; i < num_factions; ++i)
 	{
-		faction_ids[m_factions[i][0].AsString()] = i;
-	}
-
-	while (iter.HasNext())
-	{
-		CPyObject faction = iter.Next();
-		int faction_id = faction_ids[faction[0].AsString()];
+		CPyObject faction = m_factions[i];
 		CPyIter relation_iter = faction[4].GetIter();
 
-		relations[faction_id][faction_id] = faction[3].AsFloat();
+		relations[i][i] = faction[3].AsFloat();
 
 		while (relation_iter.HasNext())
 		{
 			CPyObject relation = relation_iter.Next();
-			int other_id;
-
-			if (relation[0].IsString())
-				other_id = faction_ids[relation[0].AsString()];
-			else
-				other_id = relation[0].AsLong();
-
+			int other_id = GetId("fac", relation[0], (std::string)faction[0].AsString() + " relations");
 			double value = relation[1].AsFloat();
 
-			relations[faction_id][other_id] = value;
+			relations[i][other_id] = value;
 
-			if (relations[other_id][faction_id] == 0.0)
-				relations[other_id][faction_id] = value;
+			if (relations[other_id][i] == 0.0)
+				relations[other_id][i] = value;
 		}
 	}
 
-	iter = m_factions.GetIter();
 	stream << "factionsfile version 1" << std::endl;
-	stream << m_factions.Size() << std::endl;
+	stream << num_factions << std::endl;
 
-	while (iter.HasNext())
+	for (int i = 0; i < num_factions; ++i)
 	{
-		CPyObject faction = iter.Next();
-		int faction_id = faction_ids[faction[0].AsString()];
+		CPyObject faction = m_factions[i];
 		
 		stream << "fac_" << encode_id(faction[0].AsString()) << " ";
 		stream << encode_str(faction[1].AsString()) << " ";
@@ -737,9 +777,9 @@ void ModuleSystem::WriteFactions()
 		else
 			stream << 0xAAAAAA << " ";
 
-		for (int i = 0; i < m_factions.Len(); ++i)
+		for (int j = 0; j < m_factions.Len(); ++j)
 		{
-			stream << relations[faction_id][i] << " ";
+			stream << relations[i][j] << " ";
 		}
 
 		if (faction.Len() > 5)
@@ -815,8 +855,9 @@ void ModuleSystem::WriteItems()
 	while (iter.HasNext())
 	{
 		CPyObject item = iter.Next();
+		std::string name = "itm_" + encode_id(item[0].AsString());
 		
-		stream << "itm_" << encode_id(item[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_str(item[1].AsString()) << " ";
 		stream << encode_str(item[1].AsString()) << " ";
 
@@ -825,7 +866,7 @@ void ModuleSystem::WriteItems()
 
 		if (num_variations > 16)
 		{
-			Warning("item variation count exceeds 16");
+			Warning(wl_warning, "item variation count exceeds 16", name);
 			num_variations = 16;
 		}
 
@@ -835,7 +876,7 @@ void ModuleSystem::WriteItems()
 		{
 			CPyObject variation = variations[i];
 			
-			stream << GetResource(variation[0], res_mesh) << " ";
+			stream << GetResource(variation[0], res_mesh, name) << " ";
 			stream << variation[1] << " ";
 		}
 
@@ -883,7 +924,7 @@ void ModuleSystem::WriteItems()
 
 			if (num_factions > 16)
 			{
-				Warning("item faction count exceeds 16");
+				Warning(wl_warning, "item faction count exceeds 16", name);
 				num_factions = 16;
 			}
 
@@ -900,7 +941,7 @@ void ModuleSystem::WriteItems()
 		}
 
 		if (item.Len() > 8)
-			WriteSimpleTriggerBlock(item[8], stream);
+			WriteSimpleTriggerBlock(item[8], stream, name);
 		else
 			stream << "0" << std::endl;
 	}
@@ -919,12 +960,13 @@ void ModuleSystem::WriteMapIcons()
 	while (iter.HasNext())
 	{
 		CPyObject map_icon = iter.Next();
+		std::string name = encode_id(map_icon[0].AsString());
 		
-		stream << encode_id(map_icon[0].AsString()) << " ";
+		stream << name << " ";
 		stream << map_icon[1] << " ";
-		stream << GetResource(map_icon[2], res_mesh) << " ";
+		stream << GetResource(map_icon[2], res_mesh, name) << " ";
 		stream << map_icon[3] << " ";
-		stream << GetId(map_icon[4]) << " ";
+		stream << GetId("snd", map_icon[4], name) << " ";
 
 		int trigger_pos;
 
@@ -944,7 +986,7 @@ void ModuleSystem::WriteMapIcons()
 		}
 
 		if (map_icon.Len() > trigger_pos)
-			WriteSimpleTriggerBlock(map_icon[trigger_pos], stream);
+			WriteSimpleTriggerBlock(map_icon[trigger_pos], stream, name);
 		else
 			stream << "0 ";
 
@@ -965,12 +1007,13 @@ void ModuleSystem::WriteMenus()
 	while (iter.HasNext())
 	{
 		CPyObject menu = iter.Next();
+		std::string name = "menu_" + encode_id(menu[0].AsString());
 
-		stream << "menu_" << encode_id(menu[0].AsString()) << " ";
+		stream << name << " ";
 		stream << menu[1] << " ";
 		stream << encode_str(menu[2].AsString()) << " ";
-		stream << GetResource(menu[3], res_mesh) << " ";
-		WriteStatementBlock(menu[4], stream);
+		stream << GetResource(menu[3], res_mesh, name) << " ";
+		WriteStatementBlock(menu[4], stream, name);
 
 		CPyObject items = menu[5];
 		CPyIter item_iter = items.GetIter();
@@ -980,12 +1023,13 @@ void ModuleSystem::WriteMenus()
 		while (item_iter.HasNext())
 		{
 			CPyObject item = item_iter.Next();
+			std::string item_name = "mno_" + encode_id(item[0].AsString());
 
 			stream << std::endl;
-			stream << "mno_" << encode_id(item[0].AsString()) << " ";
-			WriteStatementBlock(item[1], stream);
+			stream << item_name << " ";
+			WriteStatementBlock(item[1], stream, name + ", " + item_name + ", conditions");
 			stream << encode_str(item[2].AsString()) << " ";
-			WriteStatementBlock(item[3], stream);
+			WriteStatementBlock(item[3], stream, name + ", " + item_name + ", consequences");
 			
 			if (item.Len() > 4)
 				stream << encode_str(item[4].AsString()) << " ";
@@ -1009,10 +1053,11 @@ void ModuleSystem::WriteMeshes()
 	while (iter.HasNext())
 	{
 		CPyObject mesh = iter.Next();
+		std::string name = "mesh_" + encode_id(mesh[0].AsString());
 		
-		stream << "mesh_" << encode_id(mesh[0].AsString()) << " ";
+		stream << name << " ";
 		stream << mesh[1] << " ";
-		stream << GetResource(mesh[2], res_mesh) << " ";
+		stream << GetResource(mesh[2], res_mesh, name) << " ";
 		stream << mesh[3] << " ";
 		stream << mesh[4] << " ";
 		stream << mesh[5] << " ";
@@ -1039,21 +1084,22 @@ void ModuleSystem::WriteMissionTemplates()
 	while (iter.HasNext())
 	{
 		CPyObject mission_template = iter.Next();
+		std::string name = "mst_" + encode_id(mission_template[0].AsString());
 
-		stream << "mst_" << encode_id(mission_template[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_id(mission_template[0].AsString()) << " ";
 		stream << mission_template[1] << " ";
 		stream << mission_template[2] << " ";
 		stream << encode_str(mission_template[3].AsString()) << " ";
 
 		CPyObject groups = mission_template[4];
-		CPyIter group_iter = groups.GetIter();
+		int num_groups = groups.Len();
 
-		stream << groups.Len() << " ";
+		stream << num_groups << " ";
 
-		while (group_iter.HasNext())
+		for (int j = 0; j < num_groups; ++j)
 		{
-			CPyObject group = group_iter.Next();
+			CPyObject group = groups[j];
 
 			stream << std::endl;
 			
@@ -1070,7 +1116,7 @@ void ModuleSystem::WriteMissionTemplates()
 
 				if (num_overrides > 8)
 				{
-					Warning("item override count exceeds 8");
+					Warning(wl_warning, "item override count exceeds 8", name + ", group " + itostr(j));
 					num_overrides = 8;
 				}
 
@@ -1088,7 +1134,7 @@ void ModuleSystem::WriteMissionTemplates()
 		}
 		
 		stream << std::endl;
-		WriteTriggerBlock(mission_template[5], stream);
+		WriteTriggerBlock(mission_template[5], stream, name);
 		stream << std::endl;
 	}
 }
@@ -1128,10 +1174,11 @@ void ModuleSystem::WriteParticleSystems()
 	while (iter.HasNext())
 	{
 		CPyObject particle_system = iter.Next();
+		std::string name = "psys_" + encode_id(particle_system[0].AsString());
 		
-		stream << "psys_" << encode_id(particle_system[0].AsString()) << " ";
+		stream << name << " ";
 		stream << particle_system[1] << " ";
-		stream << GetResource(particle_system[2], res_mesh) << " ";
+		stream << GetResource(particle_system[2], res_mesh, name) << " ";
 		stream << particle_system[3] << " ";
 		stream << particle_system[4] << " ";
 		stream << particle_system[5] << " ";
@@ -1192,19 +1239,23 @@ void ModuleSystem::WriteParties()
 	while (iter.HasNext())
 	{
 		CPyObject party = iter.Next();
+		std::string name = "p_" + encode_id(party[0].AsString());
 
 		stream << 1 << " " << i << " " << i++ << " ";
-		stream << "p_" << encode_id(party[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_str(party[1].AsString()) << " ";
 		stream << party[2] << " ";
-		stream << GetId(party[3]) << " "; // TODO: restrict to menu, etc...
-		stream << party[4] << " ";
-		stream << party[5] << " ";
+		stream << GetId("menu", party[3], name) << " ";
+		stream << GetId("pt", party[4], name) << " ";
+		stream << GetId("fac", party[5], name) << " ";
 		stream << party[6] << " ";
 		stream << party[6] << " ";
 		stream << party[7] << " ";
-		stream << GetId(party[8]) << " ";
-		stream << GetId(party[8]) << " ";
+
+		int target_party_id = GetId("p", party[8], name);
+
+		stream << target_party_id << " ";
+		stream << target_party_id << " ";
 
 		CPyObject position = party[9];
 		
@@ -1225,7 +1276,7 @@ void ModuleSystem::WriteParties()
 		{
 			CPyObject member = member_iter.Next();
 			
-			stream << member[0] << " ";
+			stream << GetId("trp", member[0], name + ", member " + itostr(i)) << " ";
 			stream << member[1] << " ";
 			stream << "0 ";
 			stream << member[2] << " ";
@@ -1253,20 +1304,21 @@ void ModuleSystem::WritePartyTemplates()
 	while (iter.HasNext())
 	{
 		CPyObject party_template = iter.Next();
+		std::string name = "pt_" + encode_id(party_template[0].AsString());
 
-		stream << "pt_" << encode_id(party_template[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_str(party_template[1].AsString()) << " ";
 		stream << party_template[2] << " ";
-		stream << party_template[3] << " ";
-		stream << party_template[4] << " ";
+		stream << GetId("menu", party_template[3], name) << " ";
+		stream << GetId("fac", party_template[4], name) << " ";
 		stream << party_template[5] << " ";
 
 		CPyObject members = party_template[6];
 		int num_members = members.Len();
 
-		if (num_members > 6) // TODO: print where
+		if (num_members > 6)
 		{
-			Warning("party template member count exceeds 6");
+			Warning(wl_warning, "party template member count exceeds 6", name);
 			num_members = 6;
 		}
 
@@ -1274,7 +1326,7 @@ void ModuleSystem::WritePartyTemplates()
 		{
 			CPyObject member = members[i];
 			
-			stream << member[0] << " ";
+			stream << GetId("trp", member[0], name + ", member " + itostr(i)) << " ";
 			stream << member[1] << " ";
 			stream << member[2] << " ";
 
@@ -1338,11 +1390,12 @@ void ModuleSystem::WritePresentations()
 	while (iter.HasNext())
 	{
 		CPyObject presentation = iter.Next();
+		std::string name = "prsnt_" + encode_id(presentation[0].AsString());
 		
-		stream << "prsnt_" << encode_id(presentation[0].AsString()) << " ";
+		stream << name << " ";
 		stream << presentation[1] << " ";
-		stream << GetId(presentation[2]) << " ";
-		WriteSimpleTriggerBlock(presentation[3], stream);
+		stream << GetId("mesh", presentation[2], name) << " ";
+		WriteSimpleTriggerBlock(presentation[3], stream, name);
 		stream << std::endl;
 	}
 }
@@ -1404,14 +1457,15 @@ void ModuleSystem::WriteSceneProps()
 	while (iter.HasNext())
 	{
 		CPyObject scene_prop = iter.Next();
+		std::string name = "spr_" + encode_strip(scene_prop[0].AsString());
 		
-		stream << "spr_" << encode_strip(scene_prop[0].AsString()) << " ";
+		stream << name << " ";
 		stream << scene_prop[1] << " ";
 		stream << (((unsigned long)scene_prop[1].AsLong() >> 20) & 0xFF) << " ";
-		stream << GetResource(scene_prop[2], res_mesh) << " ";
-		stream << GetResource(scene_prop[3], res_body) << " ";
+		stream << GetResource(scene_prop[2], res_mesh, name) << " ";
+		stream << GetResource(scene_prop[3], res_body, name) << " ";
 		stream << std::endl;
-		WriteSimpleTriggerBlock(scene_prop[4], stream);
+		WriteSimpleTriggerBlock(scene_prop[4], stream, name);
 		stream << std::endl;
 	}
 }
@@ -1429,12 +1483,13 @@ void ModuleSystem::WriteScenes()
 	while (iter.HasNext())
 	{
 		CPyObject scene = iter.Next();
+		std::string name = "scn_" + encode_id(scene[0].AsString());
 
-		stream << "scn_" << encode_id(scene[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_str(scene[0].AsString()) << " ";
 		stream << scene[1] << " ";
-		stream << GetResource(scene[2], res_mesh) << " ";
-		stream << GetResource(scene[3], res_body) << " ";
+		stream << GetResource(scene[2], res_mesh, name) << " ";
+		stream << GetResource(scene[3], res_body, name) << " ";
 		stream << scene[4][0] << " ";
 		stream << scene[4][1] << " ";
 		stream << scene[5][0] << " ";
@@ -1460,13 +1515,12 @@ void ModuleSystem::WriteScenes()
 			{
 				std::string name = passage.AsString();
 
-
 				if (name.empty())
 					scene_id = 0;
 				else if (name == "exit")
 					scene_id = 100000;
 				else
-					scene_id = m_ids["scn"][name];
+					scene_id = GetId("scn", passage, name);
 			}
 			
 			stream << scene_id << " ";
@@ -1479,15 +1533,7 @@ void ModuleSystem::WriteScenes()
 
 		while (chest_iter.HasNext())
 		{
-			CPyObject chest = chest_iter.Next();
-			int troop_id;
-
-			if (chest.IsLong())
-				troop_id = chest.AsLong();
-			else
-				troop_id = m_ids["trp"][chest.AsString()];
-			
-			stream << troop_id << " ";
+			stream << GetId("trp", chest_iter.Next(), name) << " ";
 		}
 
 		if (scene.Len() > 10)
@@ -1513,24 +1559,24 @@ void ModuleSystem::WriteScripts()
 	for (int i = 0; i < num_scripts; ++i)
 	{
 		CPyObject script = m_scripts[i];
-		std::string name = script[0].AsString();
+		std::string name = encode_id(script[0].AsString());
 		
 		if ((m_flags & msf_obfuscate_scripts) && name.substr(0, 5) != "game_")
 			stream << "script_" << i << " ";
 		else
-			stream << encode_id(name) << " ";
+			stream << name << " ";
 
 		CPyObject obj = script[1];
 
 		if (obj.IsTuple() || obj.IsList())
 		{
 			stream << "-1 ";
-			WriteStatementBlock(obj, stream);
+			WriteStatementBlock(obj, stream, name);
 		}
 		else
 		{
 			stream << obj << " ";
-			WriteStatementBlock(script[2], stream);
+			WriteStatementBlock(script[2], stream, name);
 		}
 
 		stream << std::endl;
@@ -1544,7 +1590,7 @@ void ModuleSystem::WriteSimpleTriggers()
 	std::ofstream stream(m_output_path + "simple_triggers.txt");
 
 	stream << "simple_triggers_file version 1" << std::endl;
-	WriteSimpleTriggerBlock(m_simple_triggers, stream);
+	WriteSimpleTriggerBlock(m_simple_triggers, stream, "simple game triggers");
 }
 
 void ModuleSystem::WriteSkills()
@@ -1578,7 +1624,7 @@ void ModuleSystem::WriteSkins()
 
 	if (num_skins > 16)
 	{
-		Warning("skin count exceeds 6");
+		Warning(wl_warning, "skin count exceeds 6");
 		num_skins = 16;
 	}
 
@@ -1588,13 +1634,14 @@ void ModuleSystem::WriteSkins()
 	for (int i = 0; i < num_skins; ++i)
 	{
 		CPyObject skin = m_skins[i];
+		std::string name = encode_id(skin[0].AsString());
 		
-		stream << encode_id(skin[0].AsString()) << " ";
+		stream << name << " ";
 		stream << skin[1] << " ";
-		stream << GetResource(skin[2], res_mesh) << " ";
-		stream << GetResource(skin[3], res_mesh) << " ";
-		stream << GetResource(skin[4], res_mesh) << " ";
-		stream << GetResource(skin[5], res_mesh) << " ";
+		stream << GetResource(skin[2], res_mesh, name) << " ";
+		stream << GetResource(skin[3], res_mesh, name) << " ";
+		stream << GetResource(skin[4], res_mesh, name) << " ";
+		stream << GetResource(skin[5], res_mesh, name) << " ";
 
 		CPyObject face_keys = skin[6];
 		CPyIter face_key_iter = face_keys.GetIter();
@@ -1620,7 +1667,7 @@ void ModuleSystem::WriteSkins()
 
 		while (hair_mesh_iter.HasNext())
 		{
-			stream << GetResource(hair_mesh_iter.Next(), res_mesh) << " ";
+			stream << GetResource(hair_mesh_iter.Next(), res_mesh, name) << " ";
 		}
 
 		CPyObject beard_meshes = skin[8];
@@ -1630,7 +1677,7 @@ void ModuleSystem::WriteSkins()
 
 		while (beard_mesh_iter.HasNext())
 		{
-			stream << GetResource(beard_mesh_iter.Next(), res_mesh) << " ";
+			stream << GetResource(beard_mesh_iter.Next(), res_mesh, name) << " ";
 		}
 
 		CPyObject hair_materials = skin[9];
@@ -1640,7 +1687,7 @@ void ModuleSystem::WriteSkins()
 
 		while (hair_material_iter.HasNext())
 		{
-			stream << GetResource(hair_material_iter.Next(), res_material) << " ";
+			stream << GetResource(hair_material_iter.Next(), res_material, name) << " ";
 		}
 
 		CPyObject beard_materials = skin[10];
@@ -1650,7 +1697,7 @@ void ModuleSystem::WriteSkins()
 
 		while (beard_material_iter.HasNext())
 		{
-			stream << GetResource(beard_material_iter.Next(), res_material) << " ";
+			stream << GetResource(beard_material_iter.Next(), res_material, name) << " ";
 		}
 
 		CPyObject face_textures = skin[11];
@@ -1662,7 +1709,7 @@ void ModuleSystem::WriteSkins()
 		{
 			CPyObject face_texture = face_texture_iter.Next();
 			
-			stream << GetResource(face_texture[0], res_material) << " ";
+			stream << GetResource(face_texture[0], res_material, name) << " ";
 			stream << face_texture[1] << " ";
 			
 			CPyObject hair_materials;
@@ -1687,7 +1734,7 @@ void ModuleSystem::WriteSkins()
 
 			for (int i = 0; i < num_hair_materials; ++i)
 			{
-				stream << GetResource(hair_materials[i], res_material) << " ";
+				stream << GetResource(hair_materials[i], res_material, name) << " ";
 			}
 
 			for (int i = 0; i < num_hair_colors; ++i)
@@ -1709,16 +1756,16 @@ void ModuleSystem::WriteSkins()
 			stream << encode_id(voice[1].Str()) << " ";
 		}
 
-		stream << GetResource(skin[13], res_skeleton) << " ";
+		stream << GetResource(skin[13], res_skeleton, name) << " ";
 		stream << skin[14] << " ";
 
 		if (skin.Len() > 15)
-			stream << GetId(skin[15]) << " ";
+			stream << GetId("psys", skin[15], name) << " ";
 		else
 			stream << "0 ";
 
 		if (skin.Len() > 16)
-			stream << GetId(skin[16]) << " ";
+			stream << GetId("psys", skin[16], name) << " ";
 		else
 			stream << "0 ";
 
@@ -1810,8 +1857,9 @@ void ModuleSystem::WriteSounds()
 	while (iter.HasNext())
 	{
 		CPyObject sound = iter.Next();
+		std::string name = "snd_" + encode_id(sound[0].AsString());
 		
-		stream << "snd_" << encode_id(sound[0].AsString()) << " ";
+		stream << name << " ";
 		stream << sound[1] << " ";
 
 		CPyObject sound_files = sound[2];
@@ -1821,7 +1869,7 @@ void ModuleSystem::WriteSounds()
 		
 		if (num_samples > 32)
 		{
-			Warning("sound sample count exceeds 32");
+			Warning(wl_warning, "sound sample count exceeds 32", name);
 			num_samples = 32;
 		}
 
@@ -1881,17 +1929,18 @@ void ModuleSystem::WriteTableaus()
 	while (iter.HasNext())
 	{
 		CPyObject tableau = iter.Next();
+		std::string name = "tab_" + encode_id(tableau[0].AsString());
 
-		stream << "tab_" << encode_id(tableau[0].AsString()) << " ";
+		stream << name << " ";
 		stream << tableau[1] << " ";
-		stream << GetResource(tableau[2].AsString(), res_material) << " ";
+		stream << GetResource(tableau[2].AsString(), res_material, name) << " ";
 		stream << tableau[3] << " ";
 		stream << tableau[4] << " ";
 		stream << tableau[5] << " ";
 		stream << tableau[6] << " ";
 		stream << tableau[7] << " ";
 		stream << tableau[8] << " ";
-		WriteStatementBlock(tableau[9], stream);
+		WriteStatementBlock(tableau[9], stream, name);
 		stream << std::endl;
 	}
 }
@@ -1903,7 +1952,7 @@ void ModuleSystem::WriteTriggers()
 	std::ofstream stream(m_output_path + "triggers.txt");
 
 	stream << "triggersfile version 1" << std::endl;
-	WriteTriggerBlock(m_triggers, stream);
+	WriteTriggerBlock(m_triggers, stream, "game triggers");
 }
 
 void ModuleSystem::WriteTroops()
@@ -1919,20 +1968,21 @@ void ModuleSystem::WriteTroops()
 	while (iter.HasNext())
 	{
 		CPyObject troop = iter.Next();
+		std::string name = "trp_" + encode_id(troop[0].AsString());
 		
-		stream << "trp_" << encode_id(troop[0].AsString()) << " ";
+		stream << name << " ";
 		stream << encode_str(troop[1].AsString()) << " ";
 		stream << encode_str(troop[2].AsString()) << " ";
 
 		if (troop.Len() > 13)
-			stream << GetResource(troop[13].Str(), res_mesh) << " ";
+			stream << GetResource(troop[13].Str(), res_mesh, name) << " ";
 		else
 			stream << "0 ";
 
 		stream << troop[3] << " ";
 		stream << troop[4] << " ";
 		stream << troop[5] << " ";
-		stream << GetId(troop[6]) << " ";
+		stream << GetId("fac", troop[6], name) << " ";
 
 		if (troop.Len() > 14)
 			stream << troop[14] << " ";
@@ -1949,7 +1999,7 @@ void ModuleSystem::WriteTroops()
 
 		for (int i = 0; i < num_items; ++i)
 		{
-			stream << GetId(items[i]) << " 0 ";
+			stream << GetId("itm", items[i], name) << " 0 ";
 		}
 
 		for (int i = num_items; i < 64; ++i)
@@ -1997,56 +2047,58 @@ void ModuleSystem::WriteTroops()
 	}
 }
 
-void ModuleSystem::WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream)
+void ModuleSystem::WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream, const std::string &context)
 {
-	CPyIter simple_trigger_iter = simple_trigger_block.GetIter();
-	stream << simple_trigger_block.Len() << std::endl;
+	int num_simple_triggers = simple_trigger_block.Len();
 
-	while (simple_trigger_iter.HasNext())
+	stream << num_simple_triggers << std::endl;
+
+	for (int i = 0; i < num_simple_triggers; ++i)
 	{
-		WriteSimpleTrigger(simple_trigger_iter.Next(), stream);
+		WriteSimpleTrigger(simple_trigger_block[i], stream, context + ", simple trigger " + itostr(i));
 		stream << std::endl;
 	}
 }
 
-void ModuleSystem::WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream)
+void ModuleSystem::WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream, const std::string &context)
 {
 	stream << simple_trigger[0] << " ";
-	WriteStatementBlock(simple_trigger[1], stream);
+	WriteStatementBlock(simple_trigger[1], stream, context);
 }
 
-void ModuleSystem::WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream)
+void ModuleSystem::WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream, const std::string &context)
 {
-	CPyIter trigger_iter = trigger_block.GetIter();
+	int num_triggers = trigger_block.Len();
 
-	stream << trigger_block.Len() << std::endl;
+	stream << num_triggers << std::endl;
 
-	while (trigger_iter.HasNext())
+	for (int i = 0; i < num_triggers; ++i)
 	{
-		WriteTrigger(trigger_iter.Next(), stream);
+		WriteTrigger(trigger_block[i], stream, context + ", trigger " + itostr(i));
 		stream << std::endl;
 	}
 }
 
-void ModuleSystem::WriteTrigger(const CPyObject &trigger, std::ostream &stream)
+void ModuleSystem::WriteTrigger(const CPyObject &trigger, std::ostream &stream, const std::string &context)
 {
 	stream << trigger[0] << " ";
 	stream << trigger[1] << " ";
 	stream << trigger[2] << " ";
-	WriteStatementBlock(trigger[3], stream);
-	WriteStatementBlock(trigger[4], stream);
+	WriteStatementBlock(trigger[3], stream, context + ", conditions");
+	WriteStatementBlock(trigger[4], stream, context + ", consequences");
 }
 
-void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream)
+void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context)
 {
 	int num_statements = statement_block.Len();
 
 	m_local_vars.clear();
 	stream << num_statements << " ";
+	m_cur_context = context;
 
-	for (int i = 0; i < num_statements; ++i)
+	for (m_cur_statement = 0; m_cur_statement < num_statements; ++m_cur_statement)
 	{
-		WriteStatement(statement_block[i], stream);
+		WriteStatement(statement_block[m_cur_statement], stream);
 	}
 
 	std::map<std::string, Variable>::const_iterator it;
@@ -2054,7 +2106,7 @@ void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::os
 	for (it = m_local_vars.begin(); it != m_local_vars.end(); ++it)
 	{
 		if (it->second.usages == 0 && it->first.substr(0, 6) != "unused")
-			Warning("unused local variable :" + it->first);
+			Warning(wl_warning, "unused local variable :" + it->first, context);
 	}
 }
 
@@ -2069,7 +2121,7 @@ void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stre
 
 		if (num_operands > 16)
 		{
-			Warning("operand count exceeds 16");
+			Warning(wl_warning, "operand count exceeds 16", m_cur_context + ", statement " + itostr(m_cur_statement));
 			num_operands = 16;
 		}
 
@@ -2086,6 +2138,6 @@ void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stre
 	}
 	else
 	{
-		Error("unrecognized statement type " + (std::string)statement.Type().Str());
+		Warning(wl_critical, "unrecognized statement type " + (std::string)statement.Type().Str(), m_cur_context + ", statement " + itostr(m_cur_statement));
 	}
 }

@@ -58,11 +58,11 @@ private:
 #define opmask_local_variable  (17ULL << 56)
 #define opmask_quick_string    (22ULL << 56)
 
-#define res_mesh      1
-#define res_material  2
-#define res_skeleton  3
-#define res_body      4
-#define res_animation 5
+#define res_mesh      0
+#define res_material  1
+#define res_skeleton  2
+#define res_body      3
+#define res_animation 4
 
 #define msf_strict                  0x1
 #define msf_obfuscate_global_vars   0x2
@@ -70,6 +70,10 @@ private:
 #define msf_obfuscate_scripts       0x8
 #define msf_skip_id_files           0x10
 #define msf_list_resources          0x20
+
+#define wl_warning  0
+#define wl_error    1
+#define wl_critical 2
 
 class ModuleSystem
 {
@@ -83,12 +87,12 @@ private:
 	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix);
 	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix);
 	CPyList AddModule(const std::string &module_name, const std::string &prefix);
-	int GetId(const CPyObject &obj);
-	std::string GetResource(const CPyObject &obj, int resource_type);
+	int GetId(const std::string &type, const CPyObject &obj, const std::string &context);
+	int GetId(const CPyObject &obj, const std::string &context);
+	std::string GetResource(const CPyObject &obj, int resource_type, const std::string &context);
 	long long ParseOperand(const CPyObject &statement, int pos);
 	void PrepareModule(const std::string &name);
-	void Error(const std::string &text);
-	void Warning(const std::string &text);
+	void Warning(int level, const std::string &text, const std::string &context = "");
 	void WriteAnimations();
 	void WriteDialogs();
 	void WriteFactions();
@@ -118,11 +122,11 @@ private:
 	void WriteTableaus();
 	void WriteTriggers();
 	void WriteTroops();
-	void WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream);
-	void WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream);
-	void WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream);
-	void WriteTrigger(const CPyObject &trigger, std::ostream &stream);
-	void WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream);
+	void WriteSimpleTriggerBlock(const CPyObject &simple_trigger_block, std::ostream &stream, const std::string &context);
+	void WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream, const std::string &context);
+	void WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream, const std::string &context);
+	void WriteTrigger(const CPyObject &trigger, std::ostream &stream, const std::string &context);
+	void WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context);
 	void WriteStatement(const CPyObject &statement, std::ostream &stream);
 
 private:
@@ -163,5 +167,7 @@ private:
 	std::map<std::string, QuickString> m_quick_strings;
 	std::map<int, std::map<std::string, int> > m_resources;
 	std::vector<std::string> m_warnings;
-	std::string m_cur_module;
+	std::vector<std::string> m_errors;
+	std::string m_cur_context;
+	int m_cur_statement;
 };
