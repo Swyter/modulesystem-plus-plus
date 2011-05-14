@@ -68,8 +68,9 @@ private:
 #define msf_obfuscate_global_vars   0x2
 #define msf_obfuscate_dialog_states 0x4
 #define msf_obfuscate_scripts       0x8
-#define msf_skip_id_files           0x10
-#define msf_list_resources          0x20
+#define msf_obfuscate_tags          0x10
+#define msf_skip_id_files           0x20
+#define msf_list_resources          0x40
 
 #define wl_warning  0
 #define wl_error    1
@@ -84,11 +85,11 @@ public:
 
 private:
 	void DoCompile();
-	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix);
-	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix);
-	CPyList AddModule(const std::string &module_name, const std::string &prefix);
+	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix, int tag = -1);
+	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, int tag = -1);
+	CPyList AddModule(const std::string &module_name, const std::string &prefix, int tag = -1);
 	int GetId(const std::string &type, const CPyObject &obj, const std::string &context);
-	int GetId(const CPyObject &obj, const std::string &context);
+	unsigned long long GetOperandId(const CPyObject &obj, const std::string &context);
 	std::string GetResource(const CPyObject &obj, int resource_type, const std::string &context);
 	long long ParseOperand(const CPyObject &statement, int pos);
 	void PrepareModule(const std::string &name);
@@ -133,6 +134,7 @@ private:
 	std::string m_input_path;
 	std::string m_output_path;
 	unsigned long long m_flags;
+	std::map<std::string, unsigned long long> m_tags;
 	std::map<std::string, std::map<std::string, int> > m_ids;
 	CPyList m_animations;
 	CPyList m_dialogs;
