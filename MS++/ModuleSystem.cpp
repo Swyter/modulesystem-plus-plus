@@ -182,58 +182,61 @@ void ModuleSystem::DoCompile()
 	if (m_output_path.back() != '\\')
 		m_output_path.push_back('\\');
 
-	std::ifstream global_var_stream("variables.txt");
-
-	if (!global_var_stream.is_open())
-		global_var_stream.open(m_output_path + "variables.txt");
-
-	if (global_var_stream.is_open())
+	if (!(m_flags * msf_obfuscate_global_vars))
 	{
-		int i = 0;
+		std::ifstream global_var_stream("variables.txt");
 
-		while (global_var_stream)
+		if (!global_var_stream.is_open())
+			global_var_stream.open(m_output_path + "variables.txt");
+
+		if (global_var_stream.is_open())
 		{
-			std::string global_var;
+			int i = 0;
 
-			global_var_stream >> global_var;
-
-			if (!global_var.empty() && m_global_vars.find(global_var) == m_global_vars.end())
+			while (global_var_stream)
 			{
-				m_global_vars[global_var].index = i++;
-				m_global_vars[global_var].compat = true;
+				std::string global_var;
+
+				global_var_stream >> global_var;
+
+				if (!global_var.empty() && m_global_vars.find(global_var) == m_global_vars.end())
+				{
+					m_global_vars[global_var].index = i++;
+					m_global_vars[global_var].compat = true;
+				}
 			}
 		}
 	}
 
 	std::cout << "Loading modules..." << std::endl;
-
-	m_animations = AddModule("animations", "animations", "anim");
+	
+	m_animations = AddModule("animations", "animations", "anim", 25);
 	m_dialogs = AddModule("dialogs", "dialogs", "");
-	m_factions = AddModule("factions", "fac");
-	m_game_menus = AddModule("game_menus", "game_menus", "mnu", "menus", "menu");
+	m_factions = AddModule("factions", "fac", 6);
+	m_game_menus = AddModule("game_menus", "game_menus", "mnu", "menus", "menu", 12);
 	m_info_pages = AddModule("info_pages", "ip");
-	m_items = AddModule("items", "itm");
-	m_map_icons = AddModule("map_icons", "icon");
-	m_meshes = AddModule("meshes", "mesh");
-	m_music = AddModule("music", "tracks", "track");
-	m_mission_templates = AddModule("mission_templates", "mission_templates", "mt", "mission_templates", "mst");
-	m_particle_systems = AddModule("particle_systems", "psys");
-	m_parties = AddModule("parties", "p");
-	m_party_templates = AddModule("party_templates", "pt");
+	m_items = AddModule("items", "itm", 4);
+	m_map_icons = AddModule("map_icons", "icon", 18);
+	m_meshes = AddModule("meshes", "mesh", 20);
+	m_music = AddModule("music", "tracks", "track", 23);
+	m_mission_templates = AddModule("mission_templates", "mission_templates", "mt", "mission_templates", "mst", 11);
+	m_particle_systems = AddModule("particle_systems", "psys", 14);
+	m_parties = AddModule("parties", "p", 9);
+	m_party_templates = AddModule("party_templates", "pt", 8);
 	m_postfx = AddModule("postfx", "postfx_params", "pfx", "postfx_params", "pfx");
-	m_presentations = AddModule("presentations", "prsnt");
-	m_quests = AddModule("quests", "qst");
-	m_scene_props = AddModule("scene_props", "spr");
-	m_scenes = AddModule("scenes", "scn");
-	m_scripts = AddModule("scripts", "script");
+	m_presentations = AddModule("presentations", "prsnt", 21);
+	m_quests = AddModule("quests", "qst", 7);
+	m_scene_props = AddModule("scene_props", "spr", 15);
+	m_scenes = AddModule("scenes", "scn", 10);
+	m_scripts = AddModule("scripts", "script", 13);
 	m_simple_triggers = AddModule("simple_triggers", "");
-	m_skills = AddModule("skills", "skl");
+	m_skills = AddModule("skills", "skl", 19);
 	m_skins = AddModule("skins", "");
-	m_sounds = AddModule("sounds", "snd");
-	m_strings = AddModule("strings", "str");
-	m_tableau_materials = AddModule("tableau_materials", "tableaus", "tableau");
+	m_sounds = AddModule("sounds", "snd", 16);
+	m_strings = AddModule("strings", "str", 3);
+	m_tableau_materials = AddModule("tableau_materials", "tableaus", "tableau", 24);
 	m_triggers = AddModule("triggers", "");
-	m_troops = AddModule("troops", "trp");
+	m_troops = AddModule("troops", "trp", 5);
 
 	std::cout << "Compiling..." << std::endl;
 	
@@ -280,7 +283,7 @@ void ModuleSystem::DoCompile()
 	}
 };
 
-CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix)
+CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix, int tag)
 {
 	std::string module_name_full = "module_" + module_name;
 	CPyModule module(module_name_full);
@@ -313,26 +316,31 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 
 		if (!(m_flags & msf_skip_id_files))
 		{
-			std::ofstream stream(m_output_path + "ID_" + id_name + ".py");
+			std::ofstream stream(m_input_path + "ID_" + id_name + ".py");
 
 			for (int i = 0; i < num_entries; ++i)
 			{
 				stream << id_prefix << "_" << ids[i] << " = " << i << std::endl;
 			}
 		}
+
+		if (tag > 0 && ((!(m_flags & msf_obfuscate_tags)) || prefix == "str"))
+		{
+			m_tags[prefix] = (unsigned long long)tag << 56;
+		}
 	}
 
 	return list;
 };
 
-CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix)
+CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, int tag)
 {
-	return AddModule(module_name, list_name, prefix, module_name, prefix);
+	return AddModule(module_name, list_name, prefix, module_name, prefix, tag);
 };
 
-CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &prefix)
+CPyList ModuleSystem::AddModule(const std::string &module_name, const std::string &prefix, int tag)
 {
-	return AddModule(module_name, module_name, prefix);
+	return AddModule(module_name, module_name, prefix, tag);
 };
 
 int ModuleSystem::GetId(const std::string &type, const CPyObject &obj, const std::string &context)
@@ -368,7 +376,7 @@ int ModuleSystem::GetId(const std::string &type, const CPyObject &obj, const std
 	return -1;
 }
 
-int ModuleSystem::GetId(const CPyObject &obj, const std::string &context)
+unsigned long long ModuleSystem::GetOperandId(const CPyObject &obj, const std::string &context)
 {
 	if (obj.IsString())
 	{
@@ -390,7 +398,7 @@ int ModuleSystem::GetId(const CPyObject &obj, const std::string &context)
 		if (m_ids[prefix].find(value) == m_ids[prefix].end())
 			Warning(wl_error, "unrecognized identifier " + str, context);
 
-		return m_ids[prefix][value];
+		return m_ids[prefix][value] | m_tags[prefix];
 	}
 	else if (obj.IsLong())
 	{
@@ -534,7 +542,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 		}
 		else
 		{
-			return GetId(operand, m_cur_context + ", statement " + itostr(m_cur_statement));
+			return GetOperandId(operand, m_cur_context + ", statement " + itostr(m_cur_statement));
 		}
 	}
 	else if (operand.IsLong())
