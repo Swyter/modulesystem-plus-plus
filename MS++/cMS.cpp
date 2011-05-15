@@ -49,15 +49,20 @@ int main(int argc, char **argv)
 
 	if (!options["-hide-tags"].empty())
 		flags |= msf_obfuscate_tags;
+	
+	char in_path[MAX_PATH];
 
-	char path[MAX_PATH];
-
-	if (!options["-path"].empty())
-		strncpy(path, options["-path"].c_str(), MAX_PATH);
+	if (!options["-in-path"].empty())
+		strncpy(in_path, options["-in-path"].c_str(), MAX_PATH);
 	else
-		GetCurrentDirectory(MAX_PATH, path);
+		GetCurrentDirectory(MAX_PATH, in_path);
 
-	ModuleSystem ms(path);
+	std::string out_path;
+
+	if (!options["-out-path"].empty())
+		out_path = options["-out-path"];
+
+	ModuleSystem ms(in_path, out_path);
 
 	ms.Compile(flags);
 }

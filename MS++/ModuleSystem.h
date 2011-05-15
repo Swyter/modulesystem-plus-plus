@@ -79,7 +79,7 @@ private:
 class ModuleSystem
 {
 public:
-	ModuleSystem(const std::string &path);
+	ModuleSystem(const std::string &in_path, const std::string &out_path);
 	~ModuleSystem();
 	void Compile(unsigned long long flags = 0);
 
