@@ -44,9 +44,10 @@ std::string encode_id(const std::string &str)
 	return text;
 }
 
-ModuleSystem::ModuleSystem(const std::string &path)
+ModuleSystem::ModuleSystem(const std::string &in_path, const std::string &out_path)
 {
-	m_input_path = path;
+	m_input_path = in_path;
+	m_output_path = out_path;
 	SetCurrentDirectory(m_input_path.c_str());
 	Py_Initialize();
 }
@@ -173,9 +174,12 @@ void ModuleSystem::DoCompile()
 		m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= optype_cf;
 	}
 
-	CPyModule module_info("module_info");
+	if (m_output_path.empty())
+	{
+		CPyModule module_info("module_info");
 
-	m_output_path = module_info.GetAttr("export_dir").Str();
+		m_output_path = module_info.GetAttr("export_dir").Str();
+	}
 
 	trim(m_output_path);
 
