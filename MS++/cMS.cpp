@@ -53,7 +53,7 @@ int main(int argc, char **argv)
 	char in_path[MAX_PATH];
 
 	if (!options["-in-path"].empty())
-		strncpy(in_path, options["-in-path"].c_str(), MAX_PATH);
+		strncpy_s(in_path, options["-in-path"].c_str(), MAX_PATH);
 	else
 		GetCurrentDirectory(MAX_PATH, in_path);
 

@@ -64,8 +64,11 @@ void ModuleSystem::Compile(unsigned long long flags)
 	if (m_input_path.back() != '\\')
 		m_input_path.push_back('\\');
 
+	CONSOLE_SCREEN_BUFFER_INFO console_info;
+	HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
 	LARGE_INTEGER frequency, t1, t2;
 	
+	GetConsoleScreenBufferInfo(console_handle, &console_info);
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&t1);
 
@@ -75,21 +78,28 @@ void ModuleSystem::Compile(unsigned long long flags)
 	}
 	catch (CPyException e)
 	{
-		std::cout << "Python exception: " << e.GetText() << std::endl;
+		SetConsoleTextAttribute(console_handle, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		std::cout << "PYTHON ERROR: ";
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		std::cout << e.GetText() << std::endl;
+		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		std::cout << "COMPILATION ABORTED" << std::endl;
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
 		return;
 	}
 	catch (CompileException e)
 	{
-		std::cout << "Compile exception: " << e.GetText() << std::endl;
+		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_INTENSITY);
+		std::cout << "ERROR: ";
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		std::cout << e.GetText() << std::endl;
+		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		std::cout << "COMPILATION ABORTED" << std::endl;
+		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
 		return;
 	}
 
 	QueryPerformanceCounter(&t2);
-
-	CONSOLE_SCREEN_BUFFER_INFO console_info;
-	HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-
-	GetConsoleScreenBufferInfo(console_handle, &console_info);
 
 	for (size_t i = 0; i < m_warnings.size(); ++i)
 	{
@@ -153,6 +163,16 @@ void ModuleSystem::Compile(unsigned long long flags)
 void ModuleSystem::DoCompile()
 {
 	std::cout << "Initializing compiler..." << std::endl;
+	
+	memset(m_operations, 0, max_num_opcodes * sizeof(unsigned int));
+	memset(m_operation_depths, 0, max_num_opcodes * sizeof(int));
+	
+	m_operation_depths[3] = -1; // try_end
+	m_operation_depths[4] = 1; // try_begin
+	m_operation_depths[6] = 1; // try_for_range
+	m_operation_depths[7] = 1; // try_for_range_backwards
+	m_operation_depths[11] = 1; // try_for_parties
+	m_operation_depths[12] = 1; // try_for_agents
 
 	CPyModule header_operations("header_operations");
 	CPyIter lhs_operations_iter = header_operations.GetAttr("lhs_operations").GetIter();
@@ -1569,17 +1589,21 @@ void ModuleSystem::WriteScripts()
 			stream << name << " ";
 
 		CPyObject obj = script[1];
+		bool fails_at_zero;
 
 		if (obj.IsTuple() || obj.IsList())
 		{
 			stream << "-1 ";
-			WriteStatementBlock(obj, stream, name);
+			fails_at_zero = WriteStatementBlock(obj, stream, name);
 		}
 		else
 		{
 			stream << obj << " ";
-			WriteStatementBlock(script[2], stream, name);
+			fails_at_zero = WriteStatementBlock(script[2], stream, name);
 		}
+
+		if (fails_at_zero && name.substr(0, 3) != "cf_")
+			Warning(wl_warning, "non cf_ script can fail", name);
 
 		stream << std::endl;
 	}
@@ -2090,8 +2114,10 @@ void ModuleSystem::WriteTrigger(const CPyObject &trigger, std::ostream &stream, 
 	WriteStatementBlock(trigger[4], stream, context + ", consequences");
 }
 
-void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context)
+bool ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context)
 {
+	int depth = 0;
+	bool fails_at_zero = false;
 	int num_statements = statement_block.Len();
 
 	m_local_vars.clear();
@@ -2100,8 +2126,11 @@ void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::os
 
 	for (m_cur_statement = 0; m_cur_statement < num_statements; ++m_cur_statement)
 	{
-		WriteStatement(statement_block[m_cur_statement], stream);
+		WriteStatement(statement_block[m_cur_statement], stream, depth, fails_at_zero);
 	}
+
+	if (depth != 0)
+		Warning(wl_error, "unexpected try block depth " + itostr(depth), context);
 
 	std::map<std::string, Variable>::const_iterator it;
 
@@ -2110,15 +2139,19 @@ void ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::os
 		if (it->second.usages == 0 && it->first.substr(0, 6) != "unused")
 			Warning(wl_warning, "unused local variable :" + it->first, context);
 	}
+
+	return fails_at_zero;
 }
 
-void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stream)
+void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stream, int &depth, bool &fails_at_zero)
 {
+	long long opcode;
+
 	if (statement.IsTuple() || statement.IsList())
 	{
-		long long opcode = statement[0].AsLong();
 		int num_operands = statement.Len() - 1;
 
+		opcode = statement[0].AsLong();
 		stream << opcode << " ";
 
 		if (num_operands > 16)
@@ -2136,10 +2169,19 @@ void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stre
 	}
 	else if (statement.IsLong())
 	{
-		stream << (long long)statement.AsLong() << " 0 ";
+		opcode = statement.AsLong();
+
+		stream << opcode << " 0 ";
 	}
 	else
 	{
 		Warning(wl_critical, "unrecognized statement type " + (std::string)statement.Type().Str(), m_cur_context + ", statement " + itostr(m_cur_statement));
 	}
+
+	int operation = opcode & 0xFFFFFFF;
+
+	depth += m_operation_depths[operation];
+
+	if (depth == 0 && m_operations[operation] & optype_cf)
+		fails_at_zero = true;
 }

@@ -76,7 +76,7 @@
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(TargetPath)" "D:\Dev\cRPG\cRPG\MS++.exe"</Command>
+      <Command>copy "$(TargetPath)" "D:\Dev\cRPG_dev\cRPG\MS++.exe"</Command>
     </PostBuildEvent>
     <ProjectReference>
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
