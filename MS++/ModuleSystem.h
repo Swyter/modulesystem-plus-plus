@@ -50,6 +50,7 @@ private:
 };
 
 #define OPCODE(obj) ((unsigned long long)obj & 0xFFFFFFF)
+#define max_num_opcodes 4096
 #define optype_lhs 0x1
 #define optype_ghs 0x2
 #define optype_cf  0x4
@@ -127,8 +128,8 @@ private:
 	void WriteSimpleTrigger(const CPyObject &simple_trigger, std::ostream &stream, const std::string &context);
 	void WriteTriggerBlock(const CPyObject &trigger_block, std::ostream &stream, const std::string &context);
 	void WriteTrigger(const CPyObject &trigger, std::ostream &stream, const std::string &context);
-	void WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context);
-	void WriteStatement(const CPyObject &statement, std::ostream &stream);
+	bool WriteStatementBlock(const CPyObject &statement_block, std::ostream &stream, const std::string &context);
+	void WriteStatement(const CPyObject &statement, std::ostream &stream, int &depth, bool &fails_at_zero);
 
 private:
 	std::string m_input_path;
@@ -163,7 +164,8 @@ private:
 	CPyList m_tableau_materials;
 	CPyList m_triggers;
 	CPyList m_troops;
-	std::map<int, unsigned int> m_operations;
+	unsigned int m_operations[max_num_opcodes];
+	int m_operation_depths[max_num_opcodes];
 	std::map<std::string, Variable> m_global_vars;
 	std::map<std::string, Variable> m_local_vars;
 	std::map<std::string, QuickString> m_quick_strings;
