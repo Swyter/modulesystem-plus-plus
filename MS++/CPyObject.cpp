@@ -239,7 +239,7 @@ void CPyObject::SetObject(PyObject *obj)
 	}
 	else
 	{
-		Py_XINCREF(Py_None);
+		Py_INCREF(Py_None);
 		m_obj = Py_None;
 	}
 }
@@ -368,6 +368,11 @@ CPyList::CPyList(PyObject *obj) : CPyObject(obj)
 {
 	if (!IsList())
 		throw CPyException("not a list");
+}
+
+void CPyList::Append(const CPyObject& cobj)
+{
+	Check3(PyList_Append(m_obj, cobj.GetRawObject()));
 }
 
 CPyObject CPyList::GetSlice(ssize_t low, ssize_t high) const

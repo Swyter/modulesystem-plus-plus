@@ -1,5 +1,12 @@
 #pragma once
 
+#include "CPyObject.h"
+#if defined _WIN32
+#include <Windows.h>
+#else
+#include <sys/time.h>
+#include <unistd.h>
+#endif
 #include <ostream>
 #include <fstream>
 #include <iomanip>
@@ -8,8 +15,23 @@
 #include <sstream>
 #include <string>
 #include <vector>
-#include "CPyObject.h"
 #include "StringUtils.h"
+
+#if defined _WIN32
+#define COLOR_RED FOREGROUND_RED | FOREGROUND_INTENSITY
+#define COLOR_GREEN FOREGROUND_GREEN | FOREGROUND_INTENSITY
+#define COLOR_BLUE FOREGROUND_BLUE | FOREGROUND_INTENSITY
+#define COLOR_MAGENTA FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY
+#define COLOR_YELLOW FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY
+#define PATH_SEPARATOR '\\'
+#else
+#define COLOR_RED 31
+#define COLOR_GREEN 32
+#define COLOR_BLUE 34
+#define COLOR_MAGENTA 35
+#define COLOR_YELLOW 33
+#define PATH_SEPARATOR '/'
+#endif
 
 struct ScriptErrorContext
 {
@@ -50,7 +72,7 @@ private:
 };
 
 #define OPCODE(obj) ((unsigned long long)obj & 0xFFFFFFF)
-#define max_num_opcodes 4096
+#define max_num_opcodes 8192
 #define optype_lhs 0x1
 #define optype_ghs 0x2
 #define optype_cf  0x4
@@ -85,6 +107,8 @@ public:
 	void Compile(unsigned long long flags = 0);
 
 private:
+	void SetConsoleColor(int color);
+	void ResetConsoleColor();
 	void DoCompile();
 	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, const std::string &id_name, const std::string &id_prefix, int tag = -1);
 	CPyList AddModule(const std::string &module_name, const std::string &list_name, const std::string &prefix, int tag = -1);
@@ -174,4 +198,8 @@ private:
 	std::vector<std::string> m_errors;
 	std::string m_cur_context;
 	int m_cur_statement;
+#if defined _WIN32
+	CONSOLE_SCREEN_BUFFER_INFO m_console_info;
+	HANDLE m_console_handle;
+#endif
 };

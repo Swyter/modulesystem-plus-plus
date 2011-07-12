@@ -1,6 +1,10 @@
 #include "Python.h"
 #include <string>
 
+#if !defined _WIN32
+#define nullptr NULL
+#endif
+
 class CPyIter;
 class CPyTuple;
 class CPyList;
@@ -111,6 +115,7 @@ public:
 	CPyList();
 	CPyList(ssize_t size);
 	CPyList(PyObject *obj);
+	void Append(const CPyObject& cobj);
 	CPyObject GetSlice(ssize_t low, ssize_t high) const;
 	CPyObject GetItem(ssize_t pos) const;
 	bool SetItem(ssize_t pos, const CPyObject& cobj);
