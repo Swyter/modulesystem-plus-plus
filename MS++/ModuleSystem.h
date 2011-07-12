@@ -5,7 +5,6 @@
 #include <Windows.h>
 #else
 #include <sys/time.h>
-#include <unistd.h>
 #endif
 #include <ostream>
 #include <fstream>
@@ -94,6 +93,7 @@ private:
 #define msf_obfuscate_tags          0x10
 #define msf_skip_id_files           0x20
 #define msf_list_resources          0x40
+#define msf_compile_module_data     0x80
 
 #define wl_warning  0
 #define wl_error    1
@@ -107,6 +107,8 @@ public:
 	void Compile(unsigned long long flags = 0);
 
 private:
+	void LoadPythonInterpreter();
+	void UnloadPythonInterpreter();
 	void SetConsoleColor(int color);
 	void ResetConsoleColor();
 	void DoCompile();
@@ -122,7 +124,9 @@ private:
 	void WriteAnimations();
 	void WriteDialogs();
 	void WriteFactions();
+	void WriteFloraKinds();
 	void WriteGlobalVars();
+	void WriteGroundSpecs();
 	void WriteInfoPages();
 	void WriteItems();
 	void WriteMapIcons();
@@ -143,6 +147,7 @@ private:
 	void WriteSimpleTriggers();
 	void WriteSkills();
 	void WriteSkins();
+	void WriteSkyboxes();
 	void WriteSounds();
 	void WriteStrings();
 	void WriteTableaus();
@@ -156,6 +161,7 @@ private:
 	void WriteStatement(const CPyObject &statement, std::ostream &stream, int &depth, bool &fails_at_zero);
 
 private:
+	int m_pass;
 	std::string m_input_path;
 	std::string m_output_path;
 	unsigned long long m_flags;
@@ -164,7 +170,9 @@ private:
 	CPyList m_animations;
 	CPyList m_dialogs;
 	CPyList m_factions;
+	CPyList m_flora_kinds;
 	CPyList m_game_menus;
+	CPyList m_ground_specs;
 	CPyList m_info_pages;
 	CPyList m_items;
 	CPyList m_map_icons;
@@ -183,6 +191,7 @@ private:
 	CPyList m_simple_triggers;
 	CPyList m_skills;
 	CPyList m_skins;
+	CPyList m_skyboxes;
 	CPyList m_sounds;
 	CPyList m_strings;
 	CPyList m_tableau_materials;

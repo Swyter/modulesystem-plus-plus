@@ -76,7 +76,7 @@
       <OptimizeReferences>true</OptimizeReferences>
     </Link>
     <PostBuildEvent>
-      <Command>copy "$(TargetPath)" "D:\Dev\cRPG_dev\cRPG\MS++.exe"</Command>
+      <Command>copy "$(TargetPath)" "D:\Dev\cRPG_dev\cRPG\MS++-win32.exe"</Command>
     </PostBuildEvent>
     <ProjectReference>
       <LinkLibraryDependencies>true</LinkLibraryDependencies>
@@ -86,11 +86,13 @@
     <ClCompile Include="cMS.cpp" />
     <ClCompile Include="CPyObject.cpp" />
     <ClCompile Include="ModuleSystem.cpp" />
+    <ClCompile Include="OptUtils.cpp" />
     <ClCompile Include="StringUtils.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CPyObject.h" />
     <ClInclude Include="ModuleSystem.h" />
+    <ClInclude Include="OptUtils.h" />
     <ClInclude Include="StringUtils.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
