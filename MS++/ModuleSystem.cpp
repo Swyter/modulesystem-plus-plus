@@ -47,12 +47,19 @@ ModuleSystem::ModuleSystem(const std::string &in_path, const std::string &out_pa
 	m_input_path = in_path;
 	m_output_path = out_path;
 #if defined _WIN32
-	if (!SetCurrentDirectory(m_input_path.c_str()))
-#else
-	if (chdir(m_input_path.c_str()) == -1)
+	m_console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+	GetConsoleScreenBufferInfo(m_console_handle, &m_console_info);
 #endif
-		std::cout << "Error changing current directory.";
+	LoadPythonInterpreter();
+}
 
+ModuleSystem::~ModuleSystem()
+{
+	UnloadPythonInterpreter();
+}
+
+void ModuleSystem::LoadPythonInterpreter()
+{
 	Py_Initialize();
 
 	PyObject *obj = PySys_GetObject("path");
@@ -64,7 +71,7 @@ ModuleSystem::ModuleSystem(const std::string &in_path, const std::string &out_pa
 	sys_path.Append(path);
 }
 
-ModuleSystem::~ModuleSystem()
+void ModuleSystem::UnloadPythonInterpreter()
 {
 	Py_Finalize();
 }
@@ -97,8 +104,6 @@ void ModuleSystem::Compile(unsigned long long flags)
 #if defined _WIN32
 	LARGE_INTEGER frequency, t1, t2;
 	
-	m_console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
-	GetConsoleScreenBufferInfo(m_console_handle, &m_console_info);
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&t1);
 #else
@@ -109,6 +114,15 @@ void ModuleSystem::Compile(unsigned long long flags)
 
 	try
 	{
+		if (!(m_flags & msf_skip_id_files))
+		{
+			m_pass = 1;
+			DoCompile();
+			UnloadPythonInterpreter();
+			LoadPythonInterpreter();
+		}
+
+		m_pass = 2;
 		DoCompile();
 	}
 	catch (CPyException e)
@@ -209,77 +223,80 @@ void ModuleSystem::Compile(unsigned long long flags)
 
 void ModuleSystem::DoCompile()
 {
-	std::cout << "Initializing compiler..." << std::endl;
-	
-	memset(m_operations, 0, max_num_opcodes * sizeof(unsigned int));
-	memset(m_operation_depths, 0, max_num_opcodes * sizeof(int));
-	
-	m_operation_depths[3] = -1; // try_end
-	m_operation_depths[4] = 1; // try_begin
-	m_operation_depths[6] = 1; // try_for_range
-	m_operation_depths[7] = 1; // try_for_range_backwards
-	m_operation_depths[11] = 1; // try_for_parties
-	m_operation_depths[12] = 1; // try_for_agents
-
-	CPyModule header_operations("header_operations");
-	CPyIter lhs_operations_iter = header_operations.GetAttr("lhs_operations").GetIter();
-	CPyIter ghs_operations_iter = header_operations.GetAttr("global_lhs_operations").GetIter();
-	CPyIter cf_operations_iter = header_operations.GetAttr("can_fail_operations").GetIter();
-
-	while (lhs_operations_iter.HasNext())
-	{
-		m_operations[OPCODE(lhs_operations_iter.Next().AsLong())] |= optype_lhs;
-	}
-
-	while (ghs_operations_iter.HasNext())
-	{
-		m_operations[OPCODE(ghs_operations_iter.Next().AsLong())] |= optype_ghs;
-	}
-
-	while (cf_operations_iter.HasNext())
-	{
-		m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= optype_cf;
-	}
-
 	if (m_output_path.empty())
-	{
-		CPyModule module_info("module_info");
-
-		m_output_path = module_info.GetAttr("export_dir").Str();
-	}
+		m_output_path = CPyModule("module_info").GetAttr("export_dir").Str();
 
 	trim(m_output_path);
 
 	if (m_output_path.length() && m_output_path[m_output_path.length() - 1] != PATH_SEPARATOR)
 		m_output_path.push_back(PATH_SEPARATOR);
 
-	if (!(m_flags * msf_obfuscate_global_vars))
+	if (m_pass == 2)
 	{
-		std::ifstream global_var_stream("variables.txt");
+		std::cout << "Initializing compiler..." << std::endl;
 
-		if (!global_var_stream.is_open())
-			global_var_stream.open(m_output_path + "variables.txt");
+		memset(m_operations, 0, max_num_opcodes * sizeof(unsigned int));
+		memset(m_operation_depths, 0, max_num_opcodes * sizeof(int));
+	
+		m_operation_depths[3] = -1; // try_end
+		m_operation_depths[4] = 1; // try_begin
+		m_operation_depths[6] = 1; // try_for_range
+		m_operation_depths[7] = 1; // try_for_range_backwards
+		m_operation_depths[11] = 1; // try_for_parties
+		m_operation_depths[12] = 1; // try_for_agents
 
-		if (global_var_stream.is_open())
+		CPyModule header_operations("header_operations");
+		CPyIter lhs_operations_iter = header_operations.GetAttr("lhs_operations").GetIter();
+		CPyIter ghs_operations_iter = header_operations.GetAttr("global_lhs_operations").GetIter();
+		CPyIter cf_operations_iter = header_operations.GetAttr("can_fail_operations").GetIter();
+
+		while (lhs_operations_iter.HasNext())
 		{
-			int i = 0;
+			m_operations[OPCODE(lhs_operations_iter.Next().AsLong())] |= optype_lhs;
+		}
 
-			while (global_var_stream)
+		while (ghs_operations_iter.HasNext())
+		{
+			m_operations[OPCODE(ghs_operations_iter.Next().AsLong())] |= optype_ghs;
+		}
+
+		while (cf_operations_iter.HasNext())
+		{
+			m_operations[OPCODE(cf_operations_iter.Next().AsLong())] |= optype_cf;
+		}
+
+		if (!(m_flags * msf_obfuscate_global_vars))
+		{
+			std::ifstream global_var_stream("variables.txt");
+
+			if (!global_var_stream.is_open())
+				global_var_stream.open(m_output_path + "variables.txt");
+
+			if (global_var_stream.is_open())
 			{
-				std::string global_var;
+				int i = 0;
 
-				global_var_stream >> global_var;
-
-				if (!global_var.empty() && m_global_vars.find(global_var) == m_global_vars.end())
+				while (global_var_stream)
 				{
-					m_global_vars[global_var].index = i++;
-					m_global_vars[global_var].compat = true;
+					std::string global_var;
+
+					global_var_stream >> global_var;
+
+					if (!global_var.empty() && m_global_vars.find(global_var) == m_global_vars.end())
+					{
+						m_global_vars[global_var].index = i++;
+						m_global_vars[global_var].compat = true;
+					}
 				}
 			}
 		}
-	}
 
-	std::cout << "Loading modules..." << std::endl;
+		std::cout << "Loading modules..." << std::endl;
+	}
+	else
+	{
+		std::cout << "Generating id files..." << std::endl;
+	}
 	
 	m_animations = AddModule("animations", "animations", "anim", 25);
 	m_dialogs = AddModule("dialogs", "dialogs", "");
@@ -309,48 +326,63 @@ void ModuleSystem::DoCompile()
 	m_triggers = AddModule("triggers", "");
 	m_troops = AddModule("troops", "trp", 5);
 
-	std::cout << "Compiling..." << std::endl;
-	
-	WriteStrings();
-	WriteSkills();
-	WriteMusic();
-	WriteAnimations();
-	WriteMeshes();
-	WriteSounds();
-	WriteSkins();
-	WriteMapIcons();
-	WriteFactions();
-	WriteItems();
-	WriteScenes();
-	WriteTroops();
-	WriteParticleSystems();
-	WriteSceneProps();
-	WriteTableaus();
-	WritePresentations();
-	WritePartyTemplates();
-	WriteParties();
-	WriteQuests();
-	WriteInfoPages();
-	WriteScripts();
-	WriteMissionTemplates();
-	WriteMenus();
-	WriteSimpleTriggers();
-	WriteTriggers();
-	WriteDialogs();
-	WritePostEffects();
-	
-	WriteQuickStrings();
-	WriteGlobalVars();
-
-	std::map<std::string, Variable>::const_iterator it;
-
-	for (it = m_global_vars.begin(); it != m_global_vars.end(); ++it)
+	if (m_flags & msf_compile_module_data)
 	{
-		if (!it->second.compat && it->second.assignments == 0)
-			Warning(wl_warning, "usage of unassigned global variable $" + it->first);
+		m_flora_kinds = AddModule("flora_kinds", "fauna_kinds", "");
+		m_skyboxes = AddModule("skyboxes", "skyboxes", "");
+		m_ground_specs = AddModule("ground_specs", "ground_specs", "");
+	}
 
-		if (!it->second.compat && it->second.usages == 0)
-			Warning(wl_warning, "unused global variable $" + it->first);
+	if (m_pass == 2)
+	{
+		WriteStrings();
+		WriteSkills();
+		WriteMusic();
+		WriteAnimations();
+		WriteMeshes();
+		WriteSounds();
+		WriteSkins();
+		WriteMapIcons();
+		WriteFactions();
+		WriteItems();
+		WriteScenes();
+		WriteTroops();
+		WriteParticleSystems();
+		WriteSceneProps();
+		WriteTableaus();
+		WritePresentations();
+		WritePartyTemplates();
+		WriteParties();
+		WriteQuests();
+		WriteInfoPages();
+		WriteScripts();
+		WriteMissionTemplates();
+		WriteMenus();
+		WriteSimpleTriggers();
+		WriteTriggers();
+		WriteDialogs();
+		WritePostEffects();
+
+		if (m_flags & msf_compile_module_data)
+		{
+			WriteFloraKinds();
+			WriteSkyboxes();
+			WriteGroundSpecs();
+		}
+	
+		WriteQuickStrings();
+		WriteGlobalVars();
+
+		std::map<std::string, Variable>::const_iterator it;
+
+		for (it = m_global_vars.begin(); it != m_global_vars.end(); ++it)
+		{
+			if (!it->second.compat && it->second.assignments == 0)
+				Warning(wl_warning, "usage of unassigned global variable $" + it->first);
+
+			if (!it->second.compat && it->second.usages == 0)
+				Warning(wl_warning, "unused global variable $" + it->first);
+		}
 	}
 };
 
@@ -377,15 +409,18 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 			
 			std::transform(name.begin(), name.end(), name.begin(), ::tolower);
 
-			if (m_ids[prefix].find(name) == m_ids[prefix].end())
-				m_ids[prefix][name] = i;
-			else
-				Warning(wl_warning, "duplicate entry " + prefix + "_" + name, module_name_full);
+			if (m_pass == 2)
+			{
+				if (m_ids[prefix].find(name) == m_ids[prefix].end())
+					m_ids[prefix][name] = i;
+				else
+					Warning(wl_warning, "duplicate entry " + prefix + "_" + name, module_name_full);
+			}
 
 			ids[i] = name;
 		}
 
-		if (!(m_flags & msf_skip_id_files))
+		if (m_pass == 1 && !(m_flags & msf_skip_id_files))
 		{
 			std::ofstream stream(m_input_path + "ID_" + id_name + ".py");
 
@@ -395,7 +430,7 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 			}
 		}
 
-		if (tag > 0 && ((!(m_flags & msf_obfuscate_tags)) || prefix == "str"))
+		if (m_pass == 2 && tag > 0 && ((!(m_flags & msf_obfuscate_tags)) || prefix == "str"))
 		{
 			m_tags[prefix] = (unsigned long long)tag << 56;
 		}
@@ -629,7 +664,7 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 
 void ModuleSystem::PrepareModule(const std::string &name)
 {
-	std::cout << "Exporting " << name << std::endl;
+	std::cout << "Compiling " << name << "..." << std::endl;
 }
 
 void ModuleSystem::Warning(int level, const std::string &text, const std::string &context)
@@ -879,6 +914,57 @@ void ModuleSystem::WriteFactions()
 	}
 }
 
+void ModuleSystem::WriteFloraKinds()
+{
+	PrepareModule("flora kinds");
+
+	std::ofstream stream(m_output_path + "Data" + PATH_SEPARATOR + "flora_kinds.txt");
+	CPyIter	iter = m_flora_kinds.GetIter();
+
+	stream << m_flora_kinds.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject flora_kind = iter.Next();
+		std::string name = encode_strip(flora_kind[0].AsString());
+		unsigned long long flags = flora_kind[1].AsNumber();
+		
+		stream << name << " ";
+		stream << flags << " ";
+
+		CPyObject meshes = flora_kind[2];
+		CPyIter	meshes_iter = meshes.GetIter();
+
+		stream << meshes.Len() << " ";
+
+		while (meshes_iter.HasNext())
+		{
+			CPyObject mesh = meshes_iter.Next();
+			
+			stream << GetResource(mesh[0], res_mesh, name) << " ";
+
+			if (mesh.Len() > 1)
+				stream << GetResource(mesh[1], res_body, name) << " ";
+			else
+				stream << "0 ";
+
+			if (flags & 0x02400000)
+			{
+				stream << GetResource(mesh[2][0], res_mesh, name) << " ";
+				stream << GetResource(mesh[2][1], res_body, name) << " ";
+			}
+		}
+
+		if (flags & 0x04000000)
+		{
+			stream << flora_kind[3] << " ";
+			stream << flora_kind[4] << " ";
+		}
+		
+		stream << std::endl;
+	}
+}
+
 void ModuleSystem::WriteGlobalVars()
 {
 	PrepareModule("global variables");
@@ -898,6 +984,36 @@ void ModuleSystem::WriteGlobalVars()
 			stream << "global_var_" << i << std::endl;
 		else
 			stream << global_vars[i] << std::endl;
+	}
+}
+
+void ModuleSystem::WriteGroundSpecs()
+{
+	PrepareModule("ground specs");
+
+	std::ofstream stream(m_output_path + "Data" + PATH_SEPARATOR + "ground_specs.txt");
+	CPyIter	iter = m_ground_specs.GetIter();
+
+	while (iter.HasNext())
+	{
+		CPyObject ground_spec = iter.Next();
+		std::string name = encode_id(ground_spec[0].AsString());
+		unsigned int flags = ground_spec[1].AsNumber();
+		
+		stream << name << " ";
+		stream << flags << " ";
+		stream << GetResource(ground_spec[2], res_material, name) << " ";
+		stream << ground_spec[3] << " ";
+		stream << GetResource(ground_spec[4], res_material, name) << " ";
+
+		if (flags & 0x4)
+		{
+			stream << ground_spec[5][0] << " ";
+			stream << ground_spec[5][1] << " ";
+			stream << ground_spec[5][2] << " ";
+		}
+
+		stream << std::endl;
 	}
 }
 
@@ -1875,6 +1991,41 @@ void ModuleSystem::WriteSkins()
 			stream << "0 ";
 		}
 
+		stream << std::endl;
+	}
+}
+
+void ModuleSystem::WriteSkyboxes()
+{
+	PrepareModule("skyboxes");
+
+	std::ofstream stream(m_output_path + "Data" + PATH_SEPARATOR + "skyboxes.txt");
+	CPyIter	iter = m_skyboxes.GetIter();
+
+	stream << m_skyboxes.Size() << std::endl;
+
+	while (iter.HasNext())
+	{
+		CPyObject skybox = iter.Next();
+		std::string name = encode_res(skybox[0].AsString());
+		
+		stream << GetResource(skybox[0], res_mesh, name) << " ";
+		stream << skybox[1] << " ";
+		stream << skybox[2] << " ";
+		stream << skybox[3] << " ";
+		stream << skybox[4] << " ";
+		stream << encode_id(skybox[5].AsString()) << " ";
+		stream << skybox[6][0] << " ";
+		stream << skybox[6][1] << " ";
+		stream << skybox[6][2] << " ";
+		stream << skybox[7][0] << " ";
+		stream << skybox[7][1] << " ";
+		stream << skybox[7][2] << " ";
+		stream << skybox[8][0] << " ";
+		stream << skybox[8][1] << " ";
+		stream << skybox[8][2] << " ";
+		stream << skybox[9][0] << " ";
+		stream << skybox[9][1] << " ";
 		stream << std::endl;
 	}
 }

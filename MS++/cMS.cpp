@@ -3,108 +3,76 @@
 #include <Windows.h>
 #else
 #include <unistd.h>
-#define MAX_PATH 1024
-#define strncpy_s strncpy
 #endif
+#include "OptUtils.h"
 #include "StringUtils.h"
 
 int main(int argc, char **argv)
 {
-	std::map<std::string, std::string> options;
-	std::string prev_option;
-
-	for (int i = 1; i < argc; ++i)
-	{
-		std::string arg = argv[i];
-		std::string cur_option = trim(arg);
-
-		if (cur_option[0] == '-')
-		{
-			prev_option = cur_option;
-			options[cur_option] = ".";
-		}
-		else if (!prev_option.empty())
-		{
-			options[prev_option] = cur_option;
-			prev_option.clear();
-		}
-		else
-		{
-			options[cur_option] = ".";
-		}
-	}
-
+	OptUtils opt(argc, argv);
 	unsigned long long flags = 0;
 
-	if (!options["-strict"].empty())
+	if (opt.Has("-strict"))
 		flags |= msf_strict;
-	
-	options.erase("-strict");
 
-	if (!options["-skip-id-files"].empty())
+	if (opt.Has("-skip-id-files"))
 		flags |= msf_skip_id_files;
 	
-	options.erase("-skip-id-files");
-
-	if (!options["-list-resources"].empty())
+	if (opt.Has("-list-resources"))
 		flags |= msf_list_resources;
 	
-	options.erase("-list-resources");
-
-	if (!options["-hide-global-vars"].empty())
+	if (opt.Has("-hide-global-vars"))
 		flags |= msf_obfuscate_global_vars;
 	
-	options.erase("-hide-global-vars");
-
-	if (!options["-hide-scripts"].empty())
+	if (opt.Has("-hide-scripts"))
 		flags |= msf_obfuscate_scripts;
 	
-	options.erase("-hide-scripts");
-
-	if (!options["-hide-dialog-states"].empty())
+	if (opt.Has("-hide-dialog-states"))
 		flags |= msf_obfuscate_dialog_states;
-	
-	options.erase("-hide-dialog-states");
 
-	if (!options["-hide-tags"].empty())
+	if (opt.Has("-hide-tags"))
 		flags |= msf_obfuscate_tags;
-	
-	options.erase("-hide-tags");
-	
-	char in_path[MAX_PATH];
 
-	if (!options["-in-path"].empty())
-		strncpy_s(in_path, options["-in-path"].c_str(), MAX_PATH);
+	if (opt.Has("-compile-data"))
+		flags |= msf_compile_module_data;
+	
+	std::string in_path;
+
+	if (opt.Has("-in-path"))
+	{
+		in_path = opt.Get("-in-path");
+	}
 	else
-#if defined _WIN32
-		if (!GetCurrentDirectory(MAX_PATH, in_path))
-#else
-		if (!getcwd(in_path, MAX_PATH))
-#endif
-		std::cout << "Error getting current directory.";
+	{
+		char buf[1024];
 
-	options.erase("-in-path");
+#if defined _WIN32
+		if (!GetCurrentDirectory(1024, buf))
+#else
+		if (!getcwd(buf, 1024))
+#endif
+			std::cout << "Error getting current directory." << std::endl;
+
+		in_path = buf;
+	}
 
 	std::string out_path;
 
-	if (!options["-out-path"].empty())
-		out_path = options["-out-path"];
+	if (opt.Has("-out-path"))
+		out_path = opt.Get("-out-path");
 
-	options.erase("-out-path");
+	std::vector<std::string> leftover = opt.Leftover();
 
-	std::map<std::string, std::string>::const_iterator it;
-
-	for (it = options.begin(); it != options.end(); ++it)
+	for (std::vector<std::string>::const_iterator it = leftover.begin(); it != leftover.end(); ++it)
 	{
-		std::cout << "Unrecognized option: " << it->first;
-		
-		if (it->second != ".")
-			std::cout << " " << it->second;
-		
-		std::cout << std::endl;
+		std::cout << "Unrecognized option: " << *it << std::endl;
 	}
+
+	if (leftover.size())
+		return EXIT_FAILURE;
 
 	ModuleSystem ms(in_path, out_path);
 
 	ms.Compile(flags);
+	return EXIT_SUCCESS;
 }
