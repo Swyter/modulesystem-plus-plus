@@ -1,7 +1,5 @@
 #include "ModuleSystem.h"
 
-#include <Windows.h>
-
 std::string encode_str(const std::string &str)
 {
 	std::string text = str;
@@ -48,8 +46,22 @@ ModuleSystem::ModuleSystem(const std::string &in_path, const std::string &out_pa
 {
 	m_input_path = in_path;
 	m_output_path = out_path;
-	SetCurrentDirectory(m_input_path.c_str());
+#if defined _WIN32
+	if (!SetCurrentDirectory(m_input_path.c_str()))
+#else
+	if (chdir(m_input_path.c_str()) == -1)
+#endif
+		std::cout << "Error changing current directory.";
+
 	Py_Initialize();
+
+	PyObject *obj = PySys_GetObject("path");
+	Py_XINCREF(obj);
+
+	CPyList sys_path(obj);
+	CPyString path(m_input_path);
+
+	sys_path.Append(path);
 }
 
 ModuleSystem::~ModuleSystem()
@@ -57,20 +69,43 @@ ModuleSystem::~ModuleSystem()
 	Py_Finalize();
 }
 
+void ModuleSystem::SetConsoleColor(int color)
+{
+#if defined _WIN32
+	SetConsoleTextAttribute(m_console_handle, color);
+#else
+	std::cout << "\033[0;" << color << "m";
+#endif
+}
+
+void ModuleSystem::ResetConsoleColor()
+{
+#if defined _WIN32
+	SetConsoleTextAttribute(m_console_handle, m_console_info.wAttributes);
+#else
+	std::cout << "\033[0m";
+#endif
+}
+
 void ModuleSystem::Compile(unsigned long long flags)
 {
 	m_flags = flags;
 
-	if (m_input_path.back() != '\\')
-		m_input_path.push_back('\\');
+	if (m_input_path.length() && m_input_path[m_input_path.length() - 1] != PATH_SEPARATOR)
+		m_input_path.push_back(PATH_SEPARATOR);
 
-	CONSOLE_SCREEN_BUFFER_INFO console_info;
-	HANDLE console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+#if defined _WIN32
 	LARGE_INTEGER frequency, t1, t2;
 	
-	GetConsoleScreenBufferInfo(console_handle, &console_info);
+	m_console_handle = GetStdHandle(STD_OUTPUT_HANDLE);
+	GetConsoleScreenBufferInfo(m_console_handle, &m_console_info);
 	QueryPerformanceFrequency(&frequency);
 	QueryPerformanceCounter(&t1);
+#else
+	timeval t1, t2;
+
+	gettimeofday(&t1, NULL);
+#endif
 
 	try
 	{
@@ -78,42 +113,46 @@ void ModuleSystem::Compile(unsigned long long flags)
 	}
 	catch (CPyException e)
 	{
-		SetConsoleTextAttribute(console_handle, FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_GREEN);
 		std::cout << "PYTHON ERROR: ";
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		std::cout << e.GetText() << std::endl;
-		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_MAGENTA);
 		std::cout << "COMPILATION ABORTED" << std::endl;
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		return;
 	}
 	catch (CompileException e)
 	{
-		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_RED);
 		std::cout << "ERROR: ";
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		std::cout << e.GetText() << std::endl;
-		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_BLUE | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_MAGENTA);
 		std::cout << "COMPILATION ABORTED" << std::endl;
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		return;
 	}
 
+#if defined _WIN32
 	QueryPerformanceCounter(&t2);
+#else
+	gettimeofday(&t2, NULL);
+#endif
 
 	for (size_t i = 0; i < m_warnings.size(); ++i)
 	{
-		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_GREEN | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_YELLOW);
 		std::cout << "WARNING: ";
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		std::cout << m_warnings[i] << std::endl;
 	}
 
 	for (size_t i = 0; i < m_errors.size(); ++i)
 	{
-		SetConsoleTextAttribute(console_handle, FOREGROUND_RED | FOREGROUND_INTENSITY);
+		SetConsoleColor(COLOR_RED);
 		std::cout << "ERROR: ";
-		SetConsoleTextAttribute(console_handle, console_info.wAttributes);
+		ResetConsoleColor();
 		std::cout << m_errors[i] << std::endl;
 	}
 
@@ -157,7 +196,15 @@ void ModuleSystem::Compile(unsigned long long flags)
 		}
 	}
 
-	std::cout << std::endl << "Compile time: " << ((t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart) << "ms" << std::endl;
+	double time;
+
+#if defined _WIN32
+	time = (t2.QuadPart - t1.QuadPart) * 1000.0 / frequency.QuadPart;
+#else
+	time = ((t2.tv_sec - t1.tv_sec) * 1000.0) + (t2.tv_usec - t1.tv_usec) / 1000.0;
+#endif
+
+	std::cout << std::endl << "Compile time: " << time << "ms" << std::endl;
 }
 
 void ModuleSystem::DoCompile()
@@ -203,8 +250,8 @@ void ModuleSystem::DoCompile()
 
 	trim(m_output_path);
 
-	if (m_output_path.back() != '\\')
-		m_output_path.push_back('\\');
+	if (m_output_path.length() && m_output_path[m_output_path.length() - 1] != PATH_SEPARATOR)
+		m_output_path.push_back(PATH_SEPARATOR);
 
 	if (!(m_flags * msf_obfuscate_global_vars))
 	{
@@ -393,7 +440,7 @@ int ModuleSystem::GetId(const std::string &type, const CPyObject &obj, const std
 	}
 	else if (obj.IsLong())
 	{
-		return obj.AsLong();
+		return (long)obj.AsLong();
 	}
 	
 	Warning(wl_critical, "unrecognized identifier type " + (std::string)obj.Type().Str() + " for " + (std::string)obj.Str(), context);
@@ -558,7 +605,9 @@ long long ModuleSystem::ParseOperand(const CPyObject &statement, int pos)
 
 			if (m_quick_strings.find(auto_id) == m_quick_strings.end())
 			{
-				m_quick_strings[auto_id].index = m_quick_strings.size();
+				int size = m_quick_strings.size();
+
+				m_quick_strings[auto_id].index = size;
 				m_quick_strings[auto_id].value = text;
 			}
 
@@ -1254,19 +1303,18 @@ void ModuleSystem::WriteParties()
 	PrepareModule("parties");
 
 	std::ofstream stream(m_output_path + "parties.txt");
-	CPyIter iter = m_parties.GetIter();
-	int i = 0;
+	int num_parties = m_parties.Size();
 
 	stream << "partiesfile version 1" << std::endl;
-	stream << m_parties.Size() << std::endl;
-	stream << m_parties.Size() << std::endl;
+	stream << num_parties << std::endl;
+	stream << num_parties << std::endl;
 
-	while (iter.HasNext())
+	for (int i = 0; i < num_parties; ++i)
 	{
-		CPyObject party = iter.Next();
+		CPyObject party = m_parties[i];
 		std::string name = "p_" + encode_id(party[0].AsString());
 
-		stream << 1 << " " << i << " " << i++ << " ";
+		stream << 1 << " " << i << " " << i << " ";
 		stream << name << " ";
 		stream << encode_str(party[1].AsString()) << " ";
 		stream << party[2] << " ";
@@ -1293,15 +1341,15 @@ void ModuleSystem::WriteParties()
 		stream << "0.0 ";
 
 		CPyObject members = party[10];
-		CPyIter member_iter = members.GetIter();
+		int num_members = members.Len();
 
-		stream << members.Len() << " ";
+		stream << num_members << " ";
 
-		while (member_iter.HasNext())
+		for (int j = 0; j < num_members; ++j)
 		{
-			CPyObject member = member_iter.Next();
+			CPyObject member = members[j];
 			
-			stream << GetId("trp", member[0], name + ", member " + itostr(i)) << " ";
+			stream << GetId("trp", member[0], name + ", member " + itostr(j)) << " ";
 			stream << member[1] << " ";
 			stream << "0 ";
 			stream << member[2] << " ";
@@ -1453,12 +1501,12 @@ void ModuleSystem::WriteQuickStrings()
 	std::ofstream stream(m_output_path + "quick_strings.txt");
 	std::vector<std::string> quick_strings(m_quick_strings.size());
 	std::map<std::string, QuickString>::const_iterator it;
-
+	
 	for (it = m_quick_strings.begin(); it != m_quick_strings.end(); ++it)
 	{
 		quick_strings[it->second.index] = it->first;
 	}
-
+	
 	stream << quick_strings.size() << std::endl;
 
 	for (size_t i = 0; i < quick_strings.size(); ++i)
@@ -1531,7 +1579,7 @@ void ModuleSystem::WriteScenes()
 
 			if (passage.IsLong())
 			{
-				scene_id = passage.AsLong();
+				scene_id = (long)passage.AsLong();
 			}
 			else
 			{
@@ -2145,7 +2193,7 @@ bool ModuleSystem::WriteStatementBlock(const CPyObject &statement_block, std::os
 
 void ModuleSystem::WriteStatement(const CPyObject &statement, std::ostream &stream, int &depth, bool &fails_at_zero)
 {
-	long long opcode;
+	long long opcode = -1;
 
 	if (statement.IsTuple() || statement.IsList())
 	{
