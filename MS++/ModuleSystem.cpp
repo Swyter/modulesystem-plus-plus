@@ -244,6 +244,10 @@ void ModuleSystem::DoCompile()
 		m_operation_depths[7] = 1; // try_for_range_backwards
 		m_operation_depths[11] = 1; // try_for_parties
 		m_operation_depths[12] = 1; // try_for_agents
+		m_operation_depths[15] = 1; // try_for_attached_parties (WSE)
+		m_operation_depths[16] = 1; // try_for_active_players (WSE)
+		m_operation_depths[17] = 1; // try_for_prop_instances (WSE)
+		m_operation_depths[18] = 1; // try_for_dict_keys (WSE)
 
 		CPyModule header_operations("header_operations");
 		CPyIter lhs_operations_iter = header_operations.GetAttr("lhs_operations").GetIter();
@@ -1734,6 +1738,10 @@ void ModuleSystem::WriteScenes()
 void ModuleSystem::WriteScripts()
 {
 	PrepareModule("scripts");
+	std::ofstream table_stream;
+	
+	if (m_flags & msf_obfuscate_scripts)
+		table_stream.open(m_output_path + "obfuscated_scripts.txt");
 
 	std::ofstream stream(m_output_path + "scripts.txt");
 	CPyIter iter = m_scripts.GetIter();
@@ -1747,10 +1755,15 @@ void ModuleSystem::WriteScripts()
 		CPyObject script = m_scripts[i];
 		std::string name = encode_id(script[0].AsString());
 		
-		if ((m_flags & msf_obfuscate_scripts) && name.substr(0, 5) != "game_")
+		if ((m_flags & msf_obfuscate_scripts) && name.substr(0, 5) != "game_" && name.substr(0, 4) != "wse_")
+		{
+			table_stream << "script_" << i << "=" << name << std::endl;
 			stream << "script_" << i << " ";
+		}
 		else
+		{
 			stream << name << " ";
+		}
 
 		CPyObject obj = script[1];
 		bool fails_at_zero;
