@@ -426,7 +426,14 @@ CPyList ModuleSystem::AddModule(const std::string &module_name, const std::strin
 
 		if (m_pass == 1 && !(m_flags & msf_skip_id_files))
 		{
-			std::ofstream stream(m_input_path + "ID_" + id_name + ".py");
+			std::string id_path = m_input_path;
+
+			if (m_flags & msf_separated_id_folder){
+				id_path.append("ID");
+				id_path+=PATH_SEPARATOR; //literals nonsense party :/
+			}
+
+			std::ofstream stream(id_path + "ID_" + id_name + ".py");
 
 			for (int i = 0; i < num_entries; ++i)
 			{
