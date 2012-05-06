@@ -9,6 +9,8 @@
 
 int main(int argc, char **argv)
 {
+	std::cout << ">>ModuleSystem++ by [cmpxchg8b]\r\n  -- Adapted for swysdk" <<std::endl;
+
 	OptUtils opt(argc, argv);
 	unsigned long long flags = 0;
 
@@ -35,6 +37,9 @@ int main(int argc, char **argv)
 
 	if (opt.Has("-compile-data"))
 		flags |= msf_compile_module_data;
+
+	if (opt.Has("-id-folder"))
+		flags |= msf_separated_id_folder;
 	
 	std::string in_path;
 

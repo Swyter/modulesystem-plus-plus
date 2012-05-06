@@ -94,6 +94,7 @@ private:
 #define msf_skip_id_files           0x20
 #define msf_list_resources          0x40
 #define msf_compile_module_data     0x80
+#define msf_separated_id_folder      0x90
 
 #define wl_warning  0
 #define wl_error    1
